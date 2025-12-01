@@ -205,7 +205,7 @@ else:
         st.subheader(f"图像预览")
         st.image(
             img,
-            caption=f"{img_info['method']} / {img_info['filename']}",
+            caption=f"{img_info['filename']}",
             use_container_width=True,
             clamp=True
         )
