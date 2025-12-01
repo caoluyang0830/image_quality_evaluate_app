@@ -16,7 +16,7 @@ st.set_page_config(
 
 # ========= 路径配置（适配 Streamlit Cloud）=========
 # 图像根目录（需和main.py同目录上传到GitHub）
-IMAGE_ROOT = "resultselect2"
+IMAGE_ROOT = "resultselect"
 # 确保路径兼容Windows/Linux
 IMAGE_ROOT = os.path.normpath(IMAGE_ROOT)
 
