@@ -326,7 +326,7 @@ st.subheader("📥 评分数据管理")
 
 # 1. 当前用户专属数据展示与下载
 if SAVE_FILE and os.path.exists(SAVE_FILE):
-    # 读取当前用户的专属评分数据
+    # 读取当前用户的专属评分数据（完整数据，包含method列）
     df_download = pd.read_csv(SAVE_FILE, encoding="utf-8")
     df_download = df_download.fillna("")  # 处理空值
 
@@ -339,15 +339,17 @@ if SAVE_FILE and os.path.exists(SAVE_FILE):
     - 数据文件：`{os.path.basename(SAVE_FILE)}`
     """)
 
-    # 数据预览（仅当前用户）
+    # 数据预览（仅当前用户）- 临时移除method列
     st.markdown("### 🔍 我的评分数据预览")
+    # 核心修改：预览时删除method列，不修改原数据
+    df_preview = df_download.drop(columns=["method"])
     st.dataframe(
-        df_download,
+        df_preview,  # 展示去掉method列的版本
         use_container_width=True,
         hide_index=True
     )
 
-    # 下载当前用户专属CSV
+    # 下载当前用户专属CSV（原数据，包含method列）
     with open(SAVE_FILE, "rb") as f:
         st.download_button(
             label="📤 下载我的专属评分CSV",
@@ -367,7 +369,7 @@ if SAVE_FILE and os.path.exists(SAVE_FILE):
             all_user_files.append(f)
     
     if all_user_files:
-        # 汇总所有用户数据
+        # 汇总所有用户数据（完整数据，包含method列）
         df_all = pd.DataFrame()
         for file in all_user_files:
             df_temp = pd.read_csv(file, encoding="utf-8").fillna("")
@@ -381,13 +383,14 @@ if SAVE_FILE and os.path.exists(SAVE_FILE):
         - 总评分记录：{len(df_all)} 条
         """)
 
-        # 预览汇总数据
+        # 预览汇总数据（临时移除method列）
         if st.checkbox("查看所有用户汇总数据"):
-            st.dataframe(df_all, use_container_width=True, hide_index=True)
+            df_all_preview = df_all.drop(columns=["method"])  # 核心修改
+            st.dataframe(df_all_preview, use_container_width=True, hide_index=True)
         
-        # 下载汇总CSV
+        # 下载汇总CSV（原数据，包含method列）
         all_csv_name = f"{selected_modality}_所有用户评分汇总.csv"
-        csv_all = df_all.to_csv(index=False, encoding="utf-8")
+        csv_all = df_all.to_csv(index=False, encoding="utf-8")  # 完整数据保存
         st.download_button(
             label="📤 下载所有用户评分汇总CSV",
             data=csv_all,
