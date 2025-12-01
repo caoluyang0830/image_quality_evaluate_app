@@ -16,7 +16,7 @@ st.set_page_config(
 
 # ========= 路径配置（适配 Streamlit Cloud）=========
 # 图像根目录（需和main.py同目录上传到GitHub）
-IMAGE_ROOT = "resultselect"
+IMAGE_ROOT = "resultselect2"
 # 确保路径兼容Windows/Linux
 IMAGE_ROOT = os.path.normpath(IMAGE_ROOT)
 
@@ -56,15 +56,27 @@ selected_modality = st.selectbox("📌 选择评分模态", modalities)
 SAVE_FILE = f"{selected_modality}_ratings.csv"
 SAVE_FILE = os.path.normpath(SAVE_FILE)
 
-# ========= 初始化评分CSV文件 =========
-# 定义列名（新增：name、institution 字段）
+# ========= 初始化/修复评分CSV文件 =========
+# 定义完整列名（包含新增的姓名、医疗机构）
 COLUMNS = [
     "name", "institution", "modality", "method", "filename",
     "sharpness", "artifact", "naturalness", "diagnostic_confidence"
 ]
 
-# 首次运行创建空CSV
-if not os.path.exists(SAVE_FILE):
+# 初始化或修复CSV文件（解决新旧文件兼容问题）
+if os.path.exists(SAVE_FILE):
+    # 读取现有CSV并修复列
+    df_exist = pd.read_csv(SAVE_FILE, encoding="utf-8")
+    # 检查缺失的列并补充
+    missing_cols = [col for col in COLUMNS if col not in df_exist.columns]
+    if missing_cols:
+        for col in missing_cols:
+            df_exist[col] = ""  # 缺失列填充空值
+        # 重新保存修复后的CSV
+        df_exist = df_exist[COLUMNS]  # 保证列顺序一致
+        df_exist.to_csv(SAVE_FILE, index=False, encoding="utf-8")
+else:
+    # 首次运行创建空CSV
     df_empty = pd.DataFrame(columns=COLUMNS)
     df_empty.to_csv(SAVE_FILE, index=False, encoding="utf-8")
 
@@ -101,18 +113,32 @@ if "user_name" not in st.session_state:
 if "user_institution" not in st.session_state:
     st.session_state.user_institution = ""
 
-# ========= 跳过已评分图片 =========
-# 加载已评分数据
-df_rated = pd.read_csv(SAVE_FILE, encoding="utf-8") if os.path.exists(SAVE_FILE) else pd.DataFrame(columns=COLUMNS)
-rated_set = set(df_rated["filename"] + "_" + df_rated["method"] + "_" + df_rated["name"]) if not df_rated.empty else set()
+# ========= 安全加载已评分数据并跳过已评分图片 =========
+# 安全读取修复后的CSV
+df_rated = pd.read_csv(SAVE_FILE, encoding="utf-8")
+# 处理空值（避免拼接时出现NaN）
+df_rated = df_rated.fillna("")
+
+# 生成已评分集合（增加空值判断，避免KeyError）
+rated_set = set()
+if not df_rated.empty:
+    # 只处理有姓名的有效记录（旧记录无姓名则不跳过）
+    valid_rated = df_rated[df_rated["name"] != ""]
+    if not valid_rated.empty:
+        rated_set = set(
+            valid_rated["filename"] + "_" + valid_rated["method"] + "_" + valid_rated["name"]
+        )
 
 # 自动跳过当前用户已评分的图片（多人区分）
 while st.session_state.idx < len(image_list):
     img_info = image_list[st.session_state.idx]
-    # 键增加用户名维度，区分不同用户的评分
-    key = f'{img_info["filename"]}_{img_info["method"]}_{st.session_state.user_name}'
-    if key in rated_set and st.session_state.user_name != "":
-        st.session_state.idx += 1
+    # 仅当用户已输入姓名时才跳过已评分图片
+    if st.session_state.user_name:
+        key = f'{img_info["filename"]}_{img_info["method"]}_{st.session_state.user_name}'
+        if key in rated_set:
+            st.session_state.idx += 1
+        else:
+            break
     else:
         break
 
@@ -152,9 +178,9 @@ if not user_name or not user_institution:
 
 # 显示进度
 total = len(image_list)
-# 计算当前用户已完成的数量
+# 计算当前用户已完成的数量（安全处理）
 if not df_rated.empty:
-    completed = len(df_rated[df_rated["name"] == user_name])
+    completed = len(df_rated[(df_rated["name"] == user_name) & (df_rated["institution"] == user_institution)])
 else:
     completed = 0
 progress = completed / total if total > 0 else 0
@@ -284,14 +310,17 @@ st.markdown("---")
 st.subheader("📥 评分数据管理")
 
 if os.path.exists(SAVE_FILE):
-    # 读取当前评分数据
+    # 读取当前评分数据（安全处理）
     df_download = pd.read_csv(SAVE_FILE, encoding="utf-8")
+    df_download = df_download.fillna("")  # 处理空值
 
     # 显示数据统计（新增：多用户维度）
-    total_users = df_download["name"].nunique()
+    valid_records = df_download[df_download["name"] != ""]
+    total_users = valid_records["name"].nunique() if not valid_records.empty else 0
     st.info(f"""
     📋 数据统计：
     - 总评分记录：{len(df_download)} 条
+    - 有效用户评分记录：{len(valid_records)} 条
     - 参与评分人数：{total_users} 人
     - 涉及方法：{df_download['method'].nunique()} 种
     - 最后更新：{pd.Timestamp.now().strftime('%Y-%m-%d %H:%M:%S')}
@@ -299,9 +328,11 @@ if os.path.exists(SAVE_FILE):
 
     # 可选：按用户筛选数据预览
     st.markdown("### 🔍 数据预览")
-    selected_user = st.selectbox("选择查看用户", ["全部"] + list(df_download["name"].unique()), key="preview_user")
-    if selected_user != "全部":
-        df_preview = df_download[df_download["name"] == selected_user]
+    user_list = ["全部"] + list(valid_records["name"].unique()) if not valid_records.empty else ["全部"]
+    selected_user = st.selectbox("选择查看用户", user_list, key="preview_user")
+    
+    if selected_user != "全部" and not valid_records.empty:
+        df_preview = valid_records[valid_records["name"] == selected_user]
     else:
         df_preview = df_download
 
