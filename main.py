@@ -16,7 +16,7 @@ st.set_page_config(
 
 # ========= 路径配置（适配 Streamlit Cloud）=========
 # 图像根目录（需和main.py同目录上传到GitHub）
-IMAGE_ROOT = "resultselect"
+IMAGE_ROOT = "resultselect2"
 # 确保路径兼容Windows/Linux
 IMAGE_ROOT = os.path.normpath(IMAGE_ROOT)
 
@@ -57,9 +57,9 @@ SAVE_FILE = f"{selected_modality}_ratings.csv"
 SAVE_FILE = os.path.normpath(SAVE_FILE)
 
 # ========= 初始化评分CSV文件 =========
-# 定义列名
+# 定义列名（新增：name、institution 字段）
 COLUMNS = [
-    "modality", "method", "filename",
+    "name", "institution", "modality", "method", "filename",
     "sharpness", "artifact", "naturalness", "diagnostic_confidence"
 ]
 
@@ -95,17 +95,23 @@ if not image_list:
 # ========= 初始化SessionState =========
 if "idx" not in st.session_state:
     st.session_state.idx = 0
+# 保存用户信息，避免刷新丢失
+if "user_name" not in st.session_state:
+    st.session_state.user_name = ""
+if "user_institution" not in st.session_state:
+    st.session_state.user_institution = ""
 
 # ========= 跳过已评分图片 =========
 # 加载已评分数据
 df_rated = pd.read_csv(SAVE_FILE, encoding="utf-8") if os.path.exists(SAVE_FILE) else pd.DataFrame(columns=COLUMNS)
-rated_set = set(df_rated["filename"] + "_" + df_rated["method"]) if not df_rated.empty else set()
+rated_set = set(df_rated["filename"] + "_" + df_rated["method"] + "_" + df_rated["name"]) if not df_rated.empty else set()
 
-# 自动跳过已评分的图片
+# 自动跳过当前用户已评分的图片（多人区分）
 while st.session_state.idx < len(image_list):
     img_info = image_list[st.session_state.idx]
-    key = f'{img_info["filename"]}_{img_info["method"]}'
-    if key in rated_set:
+    # 键增加用户名维度，区分不同用户的评分
+    key = f'{img_info["filename"]}_{img_info["method"]}_{st.session_state.user_name}'
+    if key in rated_set and st.session_state.user_name != "":
         st.session_state.idx += 1
     else:
         break
@@ -116,16 +122,48 @@ st.markdown(f"""
     <p style="color:#666;">采用MOS评分（1-5分），所有评分完成后可下载完整数据</p>
 """, unsafe_allow_html=True)
 
+# ========= 新增：用户信息输入区域 =========
+st.markdown("### 🧑‍💻 评分人信息（必填）")
+col_name, col_institution = st.columns(2, gap="medium")
+with col_name:
+    user_name = st.text_input(
+        "姓名",
+        value=st.session_state.user_name,
+        placeholder="请输入您的姓名",
+        label_visibility="collapsed",
+        key="input_name"
+    )
+    st.session_state.user_name = user_name  # 同步到SessionState
+
+with col_institution:
+    user_institution = st.text_input(
+        "医疗机构",
+        value=st.session_state.user_institution,
+        placeholder="请输入您的医疗机构",
+        label_visibility="collapsed",
+        key="input_institution"
+    )
+    st.session_state.user_institution = user_institution  # 同步到SessionState
+
+# 验证用户信息是否填写
+if not user_name or not user_institution:
+    st.warning("⚠️ 请先填写姓名和医疗机构信息，再进行评分！")
+    st.stop()
+
 # 显示进度
 total = len(image_list)
-completed = len(rated_set)
+# 计算当前用户已完成的数量
+if not df_rated.empty:
+    completed = len(df_rated[df_rated["name"] == user_name])
+else:
+    completed = 0
 progress = completed / total if total > 0 else 0
-st.progress(progress, text=f"进度：{completed}/{total} 张（{progress:.1%}）")
+st.progress(progress, text=f"当前用户进度：{completed}/{total} 张（{progress:.1%}）")
 
 # ========= 评分逻辑 =========
 if st.session_state.idx >= len(image_list):
     # 所有图片评分完成
-    st.success("🎉 所有图像评分已完成！")
+    st.success(f"🎉 {user_name}（{user_institution}），您的所有图像评分已完成！")
     st.balloons()  # 庆祝动画
 else:
     # 显示当前图片和评分项
@@ -211,8 +249,10 @@ else:
         )
 
         if save_btn:
-            # 构造新行数据
+            # 构造新行数据（新增：姓名、医疗机构）
             new_row = {
+                "name": user_name,
+                "institution": user_institution,
                 "modality": img_info["modality"],
                 "method": img_info["method"],
                 "filename": img_info["filename"],
@@ -247,13 +287,29 @@ if os.path.exists(SAVE_FILE):
     # 读取当前评分数据
     df_download = pd.read_csv(SAVE_FILE, encoding="utf-8")
 
-    # 显示数据统计
+    # 显示数据统计（新增：多用户维度）
+    total_users = df_download["name"].nunique()
     st.info(f"""
     📋 数据统计：
-    - 已评分图片：{len(df_download)} 张
+    - 总评分记录：{len(df_download)} 条
+    - 参与评分人数：{total_users} 人
     - 涉及方法：{df_download['method'].nunique()} 种
     - 最后更新：{pd.Timestamp.now().strftime('%Y-%m-%d %H:%M:%S')}
     """)
+
+    # 可选：按用户筛选数据预览
+    st.markdown("### 🔍 数据预览")
+    selected_user = st.selectbox("选择查看用户", ["全部"] + list(df_download["name"].unique()), key="preview_user")
+    if selected_user != "全部":
+        df_preview = df_download[df_download["name"] == selected_user]
+    else:
+        df_preview = df_download
+
+    st.dataframe(
+        df_preview,
+        use_container_width=True,
+        hide_index=True
+    )
 
     # 下载按钮
     with open(SAVE_FILE, "rb") as f:
@@ -266,13 +322,6 @@ if os.path.exists(SAVE_FILE):
             type="secondary"
         )
 
-    # 可选：显示数据预览
-    with st.expander("🔍 查看评分数据预览", expanded=False):
-        st.dataframe(
-            df_download,
-            use_container_width=True,
-            hide_index=True
-        )
 else:
     st.warning("⚠️ 暂无评分数据，请先完成至少1张图片的评分")
 
@@ -281,6 +330,6 @@ st.markdown("---")
 st.markdown(f"""
     <p style="font-size:0.9em;color:#888;">
     📁 图像根目录：`{IMAGE_ROOT}` | 📝 数据文件：`{SAVE_FILE}`<br>
-    🚀 部署环境：Streamlit Community Cloud
+    🚀 部署环境：Streamlit Community Cloud | 👥 支持多用户评分
     </p>
 """, unsafe_allow_html=True)
