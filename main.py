@@ -7,6 +7,18 @@ import warnings
 # 忽略无关警告（部署时更清爽）
 warnings.filterwarnings("ignore")
 
+# ========= 新增：隐藏 Streamlit 默认 UI（去掉 GitHub 链接核心） =========
+st.markdown("""
+<style>
+/* 隐藏右上角的默认菜单（包含 GitHub 链接） */
+#MainMenu {visibility: hidden;}
+/* 隐藏 Streamlit 页脚（包含平台标识/链接） */
+footer {visibility: hidden;}
+/* 隐藏部署状态提示（若有） */
+.deploy-status {visibility: hidden;}
+</style>
+""", unsafe_allow_html=True)
+
 # ========= 页面配置 =========
 st.set_page_config(
     page_title="图像多指标主观评分系统",
@@ -15,7 +27,7 @@ st.set_page_config(
 )
 
 # ========= 路径配置（适配 Streamlit Cloud）=========
-# 图像根目录（需和main.py同目录上传到GitHub）
+# 图像根目录（移除了 GitHub 注释）
 IMAGE_ROOT = "resultselect"
 # 确保路径兼容Windows/Linux
 IMAGE_ROOT = os.path.normpath(IMAGE_ROOT)
@@ -25,9 +37,9 @@ if not os.path.exists(IMAGE_ROOT):
     st.error(f"""
     ❌ 图像根路径不存在: `{IMAGE_ROOT}`
     请确认：
-    1. `{IMAGE_ROOT}` 文件夹已上传到GitHub仓库（和main.py同目录）
+    1. `{IMAGE_ROOT}` 文件夹已上传到应用根目录（和main.py同目录）
     2. 文件夹名称拼写正确（区分大小写）
-    """)
+    """)  # 修改：去掉了 "GitHub仓库" 相关描述
     st.stop()
 
 # ========= 模态选择 =========
@@ -356,11 +368,11 @@ if os.path.exists(SAVE_FILE):
 else:
     st.warning("⚠️ 暂无评分数据，请先完成至少1张图片的评分")
 
-# ========= 部署信息提示 =========
+# ========= 部署信息提示（移除了 GitHub/Streamlit Cloud 相关描述）=========
 st.markdown("---")
 st.markdown(f"""
     <p style="font-size:0.9em;color:#888;">
     📁 图像根目录：`{IMAGE_ROOT}` | 📝 数据文件：`{SAVE_FILE}`<br>
-    🚀 部署环境：Streamlit Community Cloud | 👥 支持多用户评分
+    👥 支持多用户评分
     </p>
 """, unsafe_allow_html=True)
