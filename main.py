@@ -70,10 +70,13 @@ if "user_name" not in st.session_state:
     st.session_state.user_name = ""
 if "user_institution" not in st.session_state:
     st.session_state.user_institution = ""
+if "user_years" not in st.session_state:  # 新增：从业年限session
+    st.session_state.user_years = ""
 
 # ========= 用户信息输入区域 =========
 st.markdown("### 🧑‍💻 评分人信息（必填）")
-col_name, col_institution = st.columns(2, gap="medium")
+# 修改为三列布局：姓名、机构、从业年限
+col_name, col_institution, col_years = st.columns(3, gap="medium")
 with col_name:
     user_name = st.text_input(
         "姓名",
@@ -94,6 +97,20 @@ with col_institution:
     )
     st.session_state.user_institution = user_institution
 
+# 新增：从业年限输入框
+with col_years:
+    user_years = st.number_input(
+        "从业年限",
+        value=int(st.session_state.user_years) if st.session_state.user_years and st.session_state.user_years.isdigit() else 0,
+        min_value=0,
+        max_value=40,
+        step=1,
+        placeholder="请输入从业年限",
+        label_visibility="collapsed",
+        key="input_years"
+    )
+    st.session_state.user_years = str(user_years)  # 存储为字符串避免类型问题
+
 # ========= 生成用户专属CSV文件名 =========
 def sanitize_filename(name):
     """清理文件名中的特殊字符，避免路径错误"""
@@ -108,13 +125,15 @@ else:
     SAVE_FILE = ""
 
 # ========= 验证用户信息 =========
-if not user_name or not user_institution:
-    st.warning("⚠️ 请先填写姓名和医疗机构信息，再进行评分！")
+# 修改验证逻辑：添加从业年限的验证
+if not user_name or not user_institution or user_years == 0:
+    st.warning("⚠️ 请完整填写姓名、医疗机构和从业年限（从业年限需大于0），再进行评分！")
     st.stop()
 
 # ========= 初始化/修复用户专属CSV文件 =========
 COLUMNS = [
-    "name", "institution", "modality", "method", "filename",
+    "name", "institution", "years_of_experience",  # 新增：从业年限列
+    "modality", "method", "filename",
     "sharpness", "artifact", "naturalness", "diagnostic_confidence"
 ]
 
@@ -126,7 +145,7 @@ elif SAVE_FILE and os.path.exists(SAVE_FILE):
     missing_cols = [col for col in COLUMNS if col not in df_exist.columns]
     if missing_cols:
         for col in missing_cols:
-            df_exist[col] = ""
+            df_exist[col] = "" if col != "years_of_experience" else 0  # 从业年限默认0
         df_exist = df_exist[COLUMNS]
         df_exist.to_csv(SAVE_FILE, index=False, encoding="utf-8")
 
@@ -170,9 +189,10 @@ while st.session_state.idx < len(image_list):
         break
 
 # ========= 主UI =========
+# 修改欢迎信息：显示从业年限
 st.markdown(f"""
     <h2>🧑‍⚕️ {selected_modality} 图像多指标主观评分系统</h2>
-    <p style="color:#666;">{user_name}（{user_institution}）专属评分表 | 采用MOS评分（1-5分）</p>
+    <p style="color:#666;">{user_name}（{user_institution} | 从业{user_years}年）专属评分表 | 采用MOS评分（1-5分）</p>
 """, unsafe_allow_html=True)
 
 # 显示进度
@@ -183,7 +203,8 @@ st.progress(progress, text=f"当前进度：{completed}/{total} 张（{progress:
 
 # ========= 评分逻辑 =========
 if st.session_state.idx >= len(image_list):
-    st.success(f"🎉 {user_name}（{user_institution}），您的所有图像评分已完成！")
+    # 修改完成信息：显示从业年限
+    st.success(f"🎉 {user_name}（{user_institution} | 从业{user_years}年），您的所有图像评分已完成！")
     st.balloons()
 else:
     img_info = image_list[st.session_state.idx]
@@ -268,6 +289,7 @@ else:
             new_row = {
                 "name": user_name,
                 "institution": user_institution,
+                "years_of_experience": user_years,  # 新增：保存从业年限
                 "modality": img_info["modality"],
                 "method": img_info["method"],
                 "filename": img_info["filename"],
@@ -299,16 +321,17 @@ if SAVE_FILE and os.path.exists(SAVE_FILE):
     df_download = pd.read_csv(SAVE_FILE, encoding="utf-8")
     df_download = df_download.fillna("")
 
-    # 个人数据统计
+    # 个人数据统计（新增从业年限显示）
     st.info(f"""
     📋 我的评分统计：
     - 总评分记录：{len(df_download)} 条
     - 涉及方法：{df_download['method'].nunique()} 种
+    - 个人信息：{user_name} | {user_institution} | 从业{user_years}年
     - 最后更新：{pd.Timestamp.now().strftime('%Y-%m-%d %H:%M:%S')}
     - 数据文件：`{os.path.basename(SAVE_FILE)}`
     """)
 
-    # 数据预览（隐藏method列）
+    # 数据预览（显示从业年限列，隐藏method列）
     st.markdown("### 🔍 我的评分数据预览")
     df_preview = df_download.drop(columns=["method"])
     st.dataframe(
@@ -335,6 +358,6 @@ st.markdown("---")
 st.markdown(f"""
     <p style="font-size:0.9em;color:#888;">
     📁 图像根目录：`{IMAGE_ROOT}` | 📝 我的专属数据文件：`{os.path.basename(SAVE_FILE) if SAVE_FILE else '未生成'}`<br>
-    👤 仅展示和下载当前用户的专属评分数据
+    👤 仅展示和下载当前用户的专属评分数据 | 📅 从业年限：{user_years}年
     </p>
 """, unsafe_allow_html=True)
