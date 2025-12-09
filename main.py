@@ -17,6 +17,10 @@ st.markdown("""
 footer {visibility: hidden;}
 /* 隐藏部署状态提示 */
 .deploy-status {visibility: hidden;}
+/* 隐藏文本输入框的默认边框高亮（可选，优化视觉） */
+.stTextInput > div > div > input:focus {
+    box-shadow: none;
+}
 </style>
 """, unsafe_allow_html=True)
 
@@ -97,18 +101,30 @@ with col_institution:
     )
     st.session_state.user_institution = user_institution
 
-# 新增：从业年限输入框
+#  修改：从业年限改为纯文本输入（仅支持数字）
 with col_years:
-    user_years = st.number_input(
+    user_years_input = st.text_input(
         "从业年限",
-        value=int(st.session_state.user_years) if st.session_state.user_years and st.session_state.user_years.isdigit() else 0,
-        min_value=0,
-        max_value=80,
-        step=1,
-        placeholder="请输入从业年限",
+        value=st.session_state.user_years,
+        placeholder="请输入数字（0-80）",
         label_visibility="collapsed",
-        key="input_years"
+        key="input_years",
+        # 限制输入类型为数字（通过HTML属性）
+        help="仅支持0-80之间的整数"
     )
+    
+    # 验证输入是否为数字
+    user_years = 0
+    if user_years_input.strip():
+        if user_years_input.isdigit():
+            user_years = int(user_years_input)
+            # 限制范围在0-80
+            if user_years < 0:
+                user_years = 0
+            elif user_years > 80:
+                user_years = 80
+        else:
+            st.error("❌ 请输入有效的数字")
     st.session_state.user_years = str(user_years)  # 存储为字符串避免类型问题
 
 # ========= 生成用户专属CSV文件名 =========
@@ -125,9 +141,15 @@ else:
     SAVE_FILE = ""
 
 # ========= 验证用户信息 =========
-# 修改验证逻辑：添加从业年限的验证
-if not user_name or not user_institution or user_years == 0:
-    st.warning("⚠️ 请完整填写姓名、医疗机构和从业年限（从业年限需大于0），再进行评分！")
+# 修改验证逻辑：添加从业年限的验证（需为有效数字且大于0）
+if not user_name:
+    st.warning("⚠️ 请输入您的姓名！")
+    st.stop()
+if not user_institution:
+    st.warning("⚠️ 请输入您的医疗机构！")
+    st.stop()
+if user_years <= 0:
+    st.warning("⚠️ 请输入有效的从业年限（需大于0）！")
     st.stop()
 
 # ========= 初始化/修复用户专属CSV文件 =========
