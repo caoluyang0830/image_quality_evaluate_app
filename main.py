@@ -103,7 +103,7 @@ with col_years:
         "从业年限",
         value=int(st.session_state.user_years) if st.session_state.user_years and st.session_state.user_years.isdigit() else 0,
         min_value=0,
-        max_value=40,
+        max_value=80,
         step=1,
         placeholder="请输入从业年限",
         label_visibility="collapsed",
