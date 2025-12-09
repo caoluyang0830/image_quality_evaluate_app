@@ -101,30 +101,32 @@ with col_institution:
     )
     st.session_state.user_institution = user_institution
 
-#  修改：从业年限改为纯文本输入（仅支持数字）
+# 修改：从业年限改为纯文本输入（支持小数点）
 with col_years:
     user_years_input = st.text_input(
         "从业年限",
         value=st.session_state.user_years,
-        placeholder="请输入数字（0-80）",
+        placeholder="请输入数字（0-80，支持小数）",
         label_visibility="collapsed",
         key="input_years",
-        # 限制输入类型为数字（通过HTML属性）
-        help="仅支持0-80之间的整数"
+        help="支持0-80之间的整数或小数（如3.5）"
     )
     
-    # 验证输入是否为数字
-    user_years = 0
+    # 验证输入是否为有效数字（整数或小数）
+    user_years = 0.0
     if user_years_input.strip():
-        if user_years_input.isdigit():
-            user_years = int(user_years_input)
+        # 支持整数和小数的正则匹配
+        if re.match(r'^-?\d+(\.\d+)?$', user_years_input):
+            user_years = float(user_years_input)
             # 限制范围在0-80
             if user_years < 0:
-                user_years = 0
+                user_years = 0.0
             elif user_years > 80:
-                user_years = 80
+                user_years = 80.0
+            # 保留1位小数（可选，避免过多小数位）
+            user_years = round(user_years, 1)
         else:
-            st.error("❌ 请输入有效的数字")
+            st.error("❌ 请输入有效的数字（支持小数）")
     st.session_state.user_years = str(user_years)  # 存储为字符串避免类型问题
 
 # ========= 生成用户专属CSV文件名 =========
@@ -148,7 +150,7 @@ if not user_name:
 if not user_institution:
     st.warning("⚠️ 请输入您的医疗机构！")
     st.stop()
-if user_years <= 0:
+if user_years <= 0.0:
     st.warning("⚠️ 请输入有效的从业年限（需大于0）！")
     st.stop()
 
@@ -167,7 +169,7 @@ elif SAVE_FILE and os.path.exists(SAVE_FILE):
     missing_cols = [col for col in COLUMNS if col not in df_exist.columns]
     if missing_cols:
         for col in missing_cols:
-            df_exist[col] = "" if col != "years_of_experience" else 0  # 从业年限默认0
+            df_exist[col] = "" if col != "years_of_experience" else 0.0  # 从业年限默认0.0（支持小数）
         df_exist = df_exist[COLUMNS]
         df_exist.to_csv(SAVE_FILE, index=False, encoding="utf-8")
 
@@ -211,7 +213,7 @@ while st.session_state.idx < len(image_list):
         break
 
 # ========= 主UI =========
-# 修改欢迎信息：显示从业年限
+# 修改欢迎信息：显示从业年限（支持小数）
 st.markdown(f"""
     <h2>🧑‍⚕️ {selected_modality} 图像多指标主观评分系统</h2>
     <p style="color:#666;">{user_name}（{user_institution} | 从业{user_years}年）专属评分表 | 采用MOS评分（1-5分）</p>
@@ -225,7 +227,7 @@ st.progress(progress, text=f"当前进度：{completed}/{total} 张（{progress:
 
 # ========= 评分逻辑 =========
 if st.session_state.idx >= len(image_list):
-    # 修改完成信息：显示从业年限
+    # 修改完成信息：显示从业年限（支持小数）
     st.success(f"🎉 {user_name}（{user_institution} | 从业{user_years}年），您的所有图像评分已完成！")
     st.balloons()
 else:
@@ -311,7 +313,7 @@ else:
             new_row = {
                 "name": user_name,
                 "institution": user_institution,
-                "years_of_experience": user_years,  # 新增：保存从业年限
+                "years_of_experience": user_years,  # 新增：保存从业年限（支持小数）
                 "modality": img_info["modality"],
                 "method": img_info["method"],
                 "filename": img_info["filename"],
@@ -343,7 +345,7 @@ if SAVE_FILE and os.path.exists(SAVE_FILE):
     df_download = pd.read_csv(SAVE_FILE, encoding="utf-8")
     df_download = df_download.fillna("")
 
-    # 个人数据统计（新增从业年限显示）
+    # 个人数据统计（新增从业年限显示，支持小数）
     st.info(f"""
     📋 我的评分统计：
     - 总评分记录：{len(df_download)} 条
