@@ -5,3 +5,16 @@ matplotlib
 fpdf
 requests
 openpyxl
+
+numpy
+
+pydrive2
+google-api-python-client
+oauth2client
+google-auth
+google-auth-oauthlib
+google-auth-httplib2
+httplib2
+pyasn1
+pyasn1-modules
+rsa
