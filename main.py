@@ -3,21 +3,22 @@ from PIL import Image
 import os
 import pandas as pd
 import warnings
-import re  # 处理用户名特殊字符
+import re
+from datetime import datetime
+import uuid
+from pydrive2.auth import GoogleAuth
+from pydrive2.drive import GoogleDrive
+from io import StringIO
 
-# 忽略无关警告（部署时更清爽）
+# 忽略无关警告
 warnings.filterwarnings("ignore")
 
 # ========= 隐藏 Streamlit 默认 UI =========
 st.markdown("""
 <style>
-/* 隐藏右上角的默认菜单 */
 #MainMenu {visibility: hidden;}
-/* 隐藏 Streamlit 页脚 */
 footer {visibility: hidden;}
-/* 隐藏部署状态提示 */
 .deploy-status {visibility: hidden;}
-/* 隐藏文本输入框的默认边框高亮（可选，优化视觉） */
 .stTextInput > div > div > input:focus {
     box-shadow: none;
 }
@@ -31,16 +32,51 @@ st.set_page_config(
     initial_sidebar_state="collapsed"
 )
 
-# ========= 路径配置 =========
+# ========= 关键配置（替换为你的信息！）=========
+# 1. 你的谷歌云盘评分文件夹 ID（步骤4中创建的 `Medical_Ratings` 文件夹 ID）
+GOOGLE_DRIVE_FOLDER_ID = "你的文件夹ID（如 123456789abcdefghijklmnopqrstuvwxyz）"
+# 2. 服务账号密钥（从 Streamlit Secrets 读取，避免硬编码）
+GOOGLE_SERVICE_ACCOUNT_KEY = st.secrets.get("GOOGLE_SERVICE_ACCOUNT_KEY")
+
+# 图像根目录
 IMAGE_ROOT = "resultselect"
 IMAGE_ROOT = os.path.normpath(IMAGE_ROOT)
+
+# ========= 初始化 Google Drive 客户端（核心）=========
+@st.cache_resource(show_spinner=False)
+def init_google_drive():
+    """初始化谷歌云盘客户端（缓存避免重复认证）"""
+    if not GOOGLE_DRIVE_FOLDER_ID or not GOOGLE_SERVICE_ACCOUNT_KEY:
+        st.error("❌ 谷歌云盘配置不完整，请检查文件夹ID和服务账号密钥！")
+        st.stop()
+
+    try:
+        # 配置服务账号认证
+        gauth = GoogleAuth()
+        # 将 JSON 密钥字符串转为字典
+        import json
+        service_account_info = json.loads(GOOGLE_SERVICE_ACCOUNT_KEY)
+        gauth.service_account_file = None
+        gauth.credentials = gauth.service_account_credentials_from_json_keyfile_dict(
+            service_account_info,
+            scopes=["https://www.googleapis.com/auth/drive.file"]  # 仅申请文件操作权限（最小权限）
+        )
+        gauth.Authorize()
+        drive = GoogleDrive(gauth)
+        return drive
+    except Exception as e:
+        st.error(f"❌ 谷歌云盘连接失败：{str(e)}")
+        st.stop()
+
+# 初始化客户端
+drive = init_google_drive()
 
 # ========= 检查图像根目录 =========
 if not os.path.exists(IMAGE_ROOT):
     st.error(f"""
     ❌ 图像根路径不存在: `{IMAGE_ROOT}`
     请确认：
-    1. `{IMAGE_ROOT}` 文件夹已上传到应用根目录（和main.py同目录）
+    1. `{IMAGE_ROOT}` 文件夹已上传到应用根目录
     2. 文件夹名称拼写正确（区分大小写）
     """)
     st.stop()
@@ -67,19 +103,20 @@ if not modalities:
 
 selected_modality = st.selectbox("📌 选择评分模态", modalities)
 
-# ========= 初始化SessionState =========
+# ========= 初始化 SessionState =========
 if "idx" not in st.session_state:
     st.session_state.idx = 0
 if "user_name" not in st.session_state:
     st.session_state.user_name = ""
 if "user_institution" not in st.session_state:
     st.session_state.user_institution = ""
-if "user_years" not in st.session_state:  # 新增：从业年限session
+if "user_years" not in st.session_state:
     st.session_state.user_years = ""
+if "submission_id" not in st.session_state:
+    st.session_state.submission_id = str(uuid.uuid4())  # 唯一会话ID
 
 # ========= 用户信息输入区域 =========
 st.markdown("### 🧑‍💻 评分人信息（必填）")
-# 修改为三列布局：姓名、机构、从业年限
 col_name, col_institution, col_years = st.columns(3, gap="medium")
 with col_name:
     user_name = st.text_input(
@@ -101,7 +138,7 @@ with col_institution:
     )
     st.session_state.user_institution = user_institution
 
-# 修改：从业年限改为纯文本输入（支持小数点）
+# 从业年限（支持小数，纯文本输入）
 with col_years:
     user_years_input = st.text_input(
         "从业年限",
@@ -112,38 +149,18 @@ with col_years:
         help="支持0-80之间的整数或小数（如3.5）"
     )
     
-    # 验证输入是否为有效数字（整数或小数）
+    # 验证输入
     user_years = 0.0
     if user_years_input.strip():
-        # 支持整数和小数的正则匹配
         if re.match(r'^-?\d+(\.\d+)?$', user_years_input):
             user_years = float(user_years_input)
-            # 限制范围在0-80
-            if user_years < 0:
-                user_years = 0.0
-            elif user_years > 80:
-                user_years = 80.0
-            # 保留1位小数（可选，避免过多小数位）
+            user_years = max(0.0, min(80.0, user_years))  # 限制范围
             user_years = round(user_years, 1)
         else:
             st.error("❌ 请输入有效的数字（支持小数）")
-    st.session_state.user_years = str(user_years)  # 存储为字符串避免类型问题
-
-# ========= 生成用户专属CSV文件名 =========
-def sanitize_filename(name):
-    """清理文件名中的特殊字符，避免路径错误"""
-    return re.sub(r'[\\/:*?"<>|]', '_', name).strip()
-
-# 仅当用户填写姓名后才生成专属文件名
-if user_name:
-    sanitized_name = sanitize_filename(user_name)
-    SAVE_FILE = f"{selected_modality}_{sanitized_name}_ratings.csv"
-    SAVE_FILE = os.path.normpath(SAVE_FILE)
-else:
-    SAVE_FILE = ""
+    st.session_state.user_years = str(user_years)
 
 # ========= 验证用户信息 =========
-# 修改验证逻辑：添加从业年限的验证（需为有效数字且大于0）
 if not user_name:
     st.warning("⚠️ 请输入您的姓名！")
     st.stop()
@@ -154,24 +171,13 @@ if user_years <= 0.0:
     st.warning("⚠️ 请输入有效的从业年限（需大于0）！")
     st.stop()
 
-# ========= 初始化/修复用户专属CSV文件 =========
+# ========= 数据列定义 =========
 COLUMNS = [
-    "name", "institution", "years_of_experience",  # 新增：从业年限列
+    "submission_id", "name", "institution", "years_of_experience",
     "modality", "method", "filename",
-    "sharpness", "artifact", "naturalness", "diagnostic_confidence"
+    "sharpness", "artifact", "naturalness", "diagnostic_confidence",
+    "submit_time"
 ]
-
-if SAVE_FILE and not os.path.exists(SAVE_FILE):
-    df_empty = pd.DataFrame(columns=COLUMNS)
-    df_empty.to_csv(SAVE_FILE, index=False, encoding="utf-8")
-elif SAVE_FILE and os.path.exists(SAVE_FILE):
-    df_exist = pd.read_csv(SAVE_FILE, encoding="utf-8")
-    missing_cols = [col for col in COLUMNS if col not in df_exist.columns]
-    if missing_cols:
-        for col in missing_cols:
-            df_exist[col] = "" if col != "years_of_experience" else 0.0  # 从业年限默认0.0（支持小数）
-        df_exist = df_exist[COLUMNS]
-        df_exist.to_csv(SAVE_FILE, index=False, encoding="utf-8")
 
 # ========= 加载图像列表 =========
 image_list = []
@@ -191,19 +197,38 @@ for method in sorted(os.listdir(modality_path)):
             })
 
 if not image_list:
-    st.error(f"❌ 模态 `{selected_modality}` 下未找到图片（支持jpg/jpeg/png格式）！")
+    st.error(f"❌ 模态 `{selected_modality}` 下未找到图片！")
     st.stop()
 
-# ========= 跳过已评分图片 =========
-rated_set = set()
-if SAVE_FILE and os.path.exists(SAVE_FILE):
-    df_rated = pd.read_csv(SAVE_FILE, encoding="utf-8")
-    df_rated = df_rated.fillna("")
-    if not df_rated.empty:
-        rated_set = set(
-            df_rated["filename"] + "_" + df_rated["method"]
-        )
+# ========= 跳过已评分图片（从谷歌云盘读取）=========
+def get_rated_files_from_drive():
+    """从谷歌云盘获取当前医生已评分的文件"""
+    rated_set = set()
+    try:
+        # 搜索当前医生的评分文件
+        sanitized_name = re.sub(r'[\\/:*?"<>|]', '_', user_name).strip()
+        query = f"'{GOOGLE_DRIVE_FOLDER_ID}' in parents and title contains '{sanitized_name}' and title contains '{st.session_state.submission_id[:8]}' and mimeType='text/csv'"
+        file_list = drive.ListFile({"q": query}).GetList()
 
+        for file in file_list:
+            # 下载文件并解析
+            csv_content = file.GetContentString()
+            df = pd.read_csv(StringIO(csv_content), encoding="utf-8")
+            # 筛选当前医生的记录
+            df_current = df[
+                (df["name"] == user_name) &
+                (df["institution"] == user_institution) &
+                (df["submission_id"] == st.session_state.submission_id)
+            ]
+            if not df_current.empty:
+                rated_set.update(df_current["filename"] + "_" + df_current["method"])
+    except Exception as e:
+        st.warning(f"⚠️ 读取已评分记录失败：{str(e)}，可能会重复评分")
+    return rated_set
+
+rated_set = get_rated_files_from_drive()
+
+# 跳过已评分图片
 while st.session_state.idx < len(image_list):
     img_info = image_list[st.session_state.idx]
     key = f'{img_info["filename"]}_{img_info["method"]}'
@@ -212,8 +237,7 @@ while st.session_state.idx < len(image_list):
     else:
         break
 
-# ========= 主UI =========
-# 修改欢迎信息：显示从业年限（支持小数）
+# ========= 主 UI =========
 st.markdown(f"""
     <h2>🧑‍⚕️ {selected_modality} 图像多指标主观评分系统</h2>
     <p style="color:#666;">{user_name}（{user_institution} | 从业{user_years}年）专属评分表 | 采用MOS评分（1-5分）</p>
@@ -227,7 +251,6 @@ st.progress(progress, text=f"当前进度：{completed}/{total} 张（{progress:
 
 # ========= 评分逻辑 =========
 if st.session_state.idx >= len(image_list):
-    # 修改完成信息：显示从业年限（支持小数）
     st.success(f"🎉 {user_name}（{user_institution} | 从业{user_years}年），您的所有图像评分已完成！")
     st.balloons()
 else:
@@ -310,78 +333,74 @@ else:
         )
 
         if save_btn:
+            # 构建评分数据
             new_row = {
+                "submission_id": st.session_state.submission_id,
                 "name": user_name,
                 "institution": user_institution,
-                "years_of_experience": user_years,  # 新增：保存从业年限（支持小数）
+                "years_of_experience": user_years,
                 "modality": img_info["modality"],
                 "method": img_info["method"],
                 "filename": img_info["filename"],
                 "sharpness": ratings["sharpness"],
                 "artifact": ratings["artifact"],
                 "naturalness": ratings["naturalness"],
-                "diagnostic_confidence": ratings["diagnostic_confidence"]
+                "diagnostic_confidence": ratings["diagnostic_confidence"],
+                "submit_time": datetime.now().strftime("%Y-%m-%d %H:%M:%S UTC")
             }
-
             df_new = pd.DataFrame([new_row])
-            df_new.to_csv(
-                SAVE_FILE,
-                mode="a",
-                header=False,
-                index=False,
-                encoding="utf-8"
-            )
 
-            st.toast(f"✅ 已保存：{img_info['filename']}", icon="✅")
-            st.session_state.idx += 1
-            st.rerun()
+            # ========= 核心：上传到谷歌云盘 =========
+            try:
+                # 定义云盘文件名（按日期+医生+会话ID分类）
+                date_str = datetime.now().strftime("%Y%m%d")
+                sanitized_name = re.sub(r'[\\/:*?"<>|]', '_', user_name).strip()
+                drive_filename = f"{selected_modality}_{date_str}_{sanitized_name}_{st.session_state.submission_id[:8]}.csv"
 
-# ========= 评分数据管理（仅个人专属）=========
-st.markdown("---")
-st.subheader("📥 我的评分数据管理")
+                # 搜索云盘中是否已存在该文件
+                query = f"'{GOOGLE_DRIVE_FOLDER_ID}' in parents and title='{drive_filename}' and mimeType='text/csv'"
+                existing_files = drive.ListFile({"q": query}).GetList()
 
-if SAVE_FILE and os.path.exists(SAVE_FILE):
-    # 读取个人专属数据
-    df_download = pd.read_csv(SAVE_FILE, encoding="utf-8")
-    df_download = df_download.fillna("")
+                if existing_files:
+                    # 若文件存在，追加数据
+                    existing_file = existing_files[0]
+                    # 下载原有内容
+                    csv_content = existing_file.GetContentString()
+                    df_exist = pd.read_csv(StringIO(csv_content), encoding="utf-8")
+                    # 合并数据
+                    df_combined = pd.concat([df_exist, df_new], ignore_index=True)
+                    # 覆盖上传
+                    csv_buffer = StringIO()
+                    df_combined.to_csv(csv_buffer, index=False, encoding="utf-8")
+                    existing_file.SetContentString(csv_buffer.getvalue())
+                    existing_file.Upload()
+                else:
+                    # 若文件不存在，创建新文件
+                    csv_buffer = StringIO()
+                    df_new.to_csv(csv_buffer, index=False, encoding="utf-8")
+                    # 创建云盘文件
+                    drive_file = drive.CreateFile({
+                        "title": drive_filename,
+                        "parents": [{"id": GOOGLE_DRIVE_FOLDER_ID}],
+                        "mimeType": "text/csv"
+                    })
+                    drive_file.SetContentString(csv_buffer.getvalue())
+                    drive_file.Upload()
 
-    # 个人数据统计（新增从业年限显示，支持小数）
-    st.info(f"""
-    📋 我的评分统计：
-    - 总评分记录：{len(df_download)} 条
-    - 涉及方法：{df_download['method'].nunique()} 种
-    - 个人信息：{user_name} | {user_institution} | 从业{user_years}年
-    - 最后更新：{pd.Timestamp.now().strftime('%Y-%m-%d %H:%M:%S')}
-    - 数据文件：`{os.path.basename(SAVE_FILE)}`
-    """)
+                # 提示成功并跳转下一张
+                st.toast(f"✅ 已保存：{img_info['filename']}", icon="✅")
+                st.session_state.idx += 1
+                st.rerun()
 
-    # 数据预览（显示从业年限列，隐藏method列）
-    st.markdown("### 🔍 我的评分数据预览")
-    df_preview = df_download.drop(columns=["method"])
-    st.dataframe(
-        df_preview,
-        use_container_width=True,
-        hide_index=True
-    )
+            except Exception as e:
+                st.error(f"❌ 保存失败：{str(e)}，请重试！")
+                st.stop()
 
-    # 下载个人专属CSV
-    with open(SAVE_FILE, "rb") as f:
-        st.download_button(
-            label="📤 下载我的专属评分CSV",
-            data=f,
-            file_name=os.path.basename(SAVE_FILE),
-            mime="text/csv",
-            use_container_width=True,
-            type="primary"
-        )
-else:
-    st.warning("⚠️ 暂无您的评分数据，请先完成至少1张图片的评分")
-
-# ========= 部署信息提示 =========
+# ========= 部署信息提示（隐藏下载按钮）=========
 st.markdown("---")
 st.markdown(f"""
     <p style="font-size:0.9em;color:#888;">
-    📁 图像根目录：`{IMAGE_ROOT}` | 📝 我的专属数据文件：`{os.path.basename(SAVE_FILE) if SAVE_FILE else '未生成'}`<br>
-    👤 仅展示和下载当前用户的专属评分数据 | 📅 从业年限：{user_years}年
+    📁 图像根目录：`{IMAGE_ROOT}` | 📝 评分数据已自动同步至谷歌云盘<br>
+    👤 仅展示当前用户的评分进度 | 📅 从业年限：{user_years}年
     </p>
 """, unsafe_allow_html=True)
