@@ -8,9 +8,7 @@ from datetime import datetime
 import uuid
 from pydrive2.auth import GoogleAuth
 from pydrive2.drive import GoogleDrive
-from oauth2client.service_account import ServiceAccountCredentials
 from io import StringIO
-import json
 
 # 忽略无关警告
 warnings.filterwarnings("ignore")
@@ -34,33 +32,18 @@ st.set_page_config(
     initial_sidebar_state="collapsed"
 )
 
-# ========= 关键配置（替换为你的信息）=========
+# ========= 配置 ==========
 GOOGLE_DRIVE_FOLDER_ID = "1_7HhWjfEK65YfsjOWR-kNrN0ogJCr2Zq"
-GOOGLE_SERVICE_ACCOUNT_KEY = st.secrets.get("GOOGLE_SERVICE_ACCOUNT_KEY")
 IMAGE_ROOT = "resultselect"
 IMAGE_ROOT = os.path.normpath(IMAGE_ROOT)
 
-# ========= 初始化 Google Drive 客户端 =========
+# ========= 初始化 Google Drive 客户端（OAuth） =========
 @st.cache_resource(show_spinner=False)
 def init_google_drive():
-    """初始化谷歌云盘客户端（缓存避免重复认证）"""
-    if not GOOGLE_DRIVE_FOLDER_ID or not GOOGLE_SERVICE_ACCOUNT_KEY:
-        st.error("❌ 谷歌云盘配置不完整，请检查文件夹ID和服务账号密钥！")
-        st.stop()
-
+    """初始化 Google Drive 客户端（OAuth）"""
     try:
-        # 将 JSON 字符串转为字典
-        service_account_info = json.loads(GOOGLE_SERVICE_ACCOUNT_KEY)
-        scopes = ['https://www.googleapis.com/auth/drive.file']
-
-        # 使用 ServiceAccountCredentials 创建凭证
-        credentials = ServiceAccountCredentials.from_json_keyfile_dict(service_account_info, scopes=scopes)
-
-        # 初始化 GoogleAuth
         gauth = GoogleAuth()
-        gauth.credentials = credentials
-
-        # 初始化 Drive
+        gauth.LocalWebserverAuth()  # 弹出浏览器授权 Google 账户
         drive = GoogleDrive(gauth)
         return drive
     except Exception as e:
@@ -105,7 +88,7 @@ if "user_years" not in st.session_state:
 if "submission_id" not in st.session_state:
     st.session_state.submission_id = str(uuid.uuid4())
 
-# ========= 用户信息输入区域 =========
+# ========= 用户信息输入 =========
 st.markdown("### 🧑‍💻 评分人信息（必填）")
 col_name, col_institution, col_years = st.columns(3, gap="medium")
 with col_name:
@@ -273,7 +256,11 @@ else:
                 else:
                     csv_buffer = StringIO()
                     df_new.to_csv(csv_buffer, index=False, encoding="utf-8")
-                    drive_file = drive.CreateFile({"title": drive_filename, "parents":[{"id": GOOGLE_DRIVE_FOLDER_ID}], "mimeType":"text/csv"})
+                    drive_file = drive.CreateFile({
+                        "title": drive_filename,
+                        "parents":[{"id": GOOGLE_DRIVE_FOLDER_ID}],
+                        "mimeType":"text/csv"
+                    })
                     drive_file.SetContentString(csv_buffer.getvalue())
                     drive_file.Upload()
 
