@@ -34,7 +34,7 @@ st.set_page_config(
 
 # ========= 关键配置（替换为你的信息！）=========
 # 1. 你的谷歌云盘评分文件夹 ID（步骤4中创建的 `Medical_Ratings` 文件夹 ID）
-GOOGLE_DRIVE_FOLDER_ID = "你的文件夹ID（如 123456789abcdefghijklmnopqrstuvwxyz）"
+GOOGLE_DRIVE_FOLDER_ID = "1_7HhWjfEK65YfsjOWR-kNrN0ogJCr2Zq"
 # 2. 服务账号密钥（从 Streamlit Secrets 读取，避免硬编码）
 GOOGLE_SERVICE_ACCOUNT_KEY = st.secrets.get("GOOGLE_SERVICE_ACCOUNT_KEY")
 
