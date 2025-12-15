@@ -14,22 +14,19 @@ st.set_page_config(
     initial_sidebar_state="expanded",
 )
 
-st.markdown(
-    """
-    <style>
-    #MainMenu {visibility: hidden;}
-    footer {visibility: hidden;}
-    .deploy-status {visibility: hidden;}
-    .stTextInput > div > div > input:focus { box-shadow: none; }
-    </style>
-    """,
-    unsafe_allow_html=True,
-)
+st.markdown("""
+<style>
+#MainMenu {visibility: hidden;}
+footer {visibility: hidden;}
+.deploy-status {visibility: hidden;}
+.stTextInput > div > div > input:focus { box-shadow: none; }
+</style>
+""", unsafe_allow_html=True)
 
-# ========= 语言选择 =========
+# ====================== 语言选择 ======================
 LANG = st.selectbox("🌐 Language / 语言", ["中文", "English"], index=0)
 
-# ========= 文本字典 =========
+# ====================== 文本字典 ======================
 TEXT = {
     "中文": {
         "title": "图像多指标主观评分系统",
@@ -91,22 +88,22 @@ TEXT = {
 
 T = TEXT[LANG]
 
-# ========= 路径配置 =========
+# ====================== 路径 ======================
 IMAGE_ROOT = os.path.normpath("resultselect")
 if not os.path.exists(IMAGE_ROOT):
     st.error(f"❌ 图像根路径不存在: {IMAGE_ROOT}")
     st.stop()
 
-# ========= 模态选择 =========
+# 模态选择
 modalities = [m for m in sorted(os.listdir(IMAGE_ROOT)) if os.path.isdir(os.path.join(IMAGE_ROOT, m))]
 selected_modality = st.selectbox(T["title"], modalities)
 
-# ========= 初始化 SessionState =========
-for key in ["user_name", "user_institution", "user_years", "selected_image_idx"]:
+# ====================== 初始化 SessionState ======================
+for key in ["user_name", "user_institution", "user_years", "selected_image_id"]:
     if key not in st.session_state:
-        st.session_state[key] = "" if "user" in key else 0
+        st.session_state[key] = "" if "user" in key else None
 
-# ========= 用户信息输入 =========
+# ====================== 用户信息输入 ======================
 st.markdown(f"### {T['rater_info']}")
 col_name, col_inst, col_years = st.columns(3, gap="medium")
 with col_name:
@@ -119,6 +116,7 @@ with col_years:
     st.caption(T['years'])
     user_years_input = st.text_input("", value=st.session_state.user_years, placeholder=T["years_placeholder"], label_visibility="collapsed", help=T["years_help"])
 
+# 校验
 user_years = 0.0
 if user_years_input.strip() and re.match(r'^-?\d+(\.\d+)?$', user_years_input):
     user_years = round(max(0.0, min(80.0, float(user_years_input))),1)
@@ -126,18 +124,17 @@ else:
     if user_years_input.strip():
         st.error(T["years_error"])
 st.session_state.user_years = str(user_years)
-
 if not st.session_state.user_name: st.warning(T["name_warn"]); st.stop()
 if not st.session_state.user_institution: st.warning(T["inst_warn"]); st.stop()
 if user_years <= 0.0: st.warning(T["years_warn"]); st.stop()
 
-# ========= 用户专属 CSV =========
+# ====================== 用户专属 CSV ======================
 def sanitize_filename(name): return re.sub(r'[\\/:*?"<>|]', '_', name).strip()
 SAVE_FILE = os.path.normpath(f"{selected_modality}_{sanitize_filename(st.session_state.user_name)}_ratings.csv")
 COLUMNS = ["name","institution","years_of_experience","modality","method","filename","sharpness","artifact","naturalness","diagnostic_confidence"]
 if not os.path.exists(SAVE_FILE): pd.DataFrame(columns=COLUMNS).to_csv(SAVE_FILE, index=False, encoding="utf-8")
 
-# ========= 加载图像列表 =========
+# ====================== 加载图像列表 ======================
 image_list = []
 modality_path = os.path.join(IMAGE_ROOT, selected_modality)
 for method in sorted(os.listdir(modality_path)):
@@ -151,39 +148,38 @@ if not image_list:
     st.error(f"❌ 模态 {selected_modality} 下未找到图片！")
     st.stop()
 
-# ========= 已评分集合 =========
+# ====================== 已评分集合 ======================
 if os.path.exists(SAVE_FILE):
     df_rated = pd.read_csv(SAVE_FILE, encoding="utf-8")
     rated_set = set(df_rated["filename"] + "_" + df_rated["method"])
 else:
     rated_set = set()
 
-# ========= 左侧图像列表 =========
+# ====================== 左侧图像列表 ======================
 st.sidebar.subheader(T["image_list"])
+image_ids = [f"{img['filename']}_{img['method']}" for img in image_list]
 labels = []
-for idx,img_info in enumerate(image_list):
-    uid = f"{img_info['filename']}_{img_info['method']}"
+for idx, uid in enumerate(image_ids):
     label = f"图像{idx+1}" if LANG=="中文" else f"Image {idx+1}"
     if uid in rated_set: label += " ✅"
     labels.append(label)
 
-# 确保 session_state 合法
-if not isinstance(st.session_state.selected_image_idx,int) or st.session_state.selected_image_idx>=len(labels):
-    st.session_state.selected_image_idx=0
+# 初始化 session_state.selected_image_id
+if st.session_state.selected_image_id not in image_ids:
+    st.session_state.selected_image_id = image_ids[0]
 
-selected_label = st.sidebar.radio(
-    T["select_image"],
-    labels,
-    index=st.session_state.selected_image_idx,
-    key="selected_image_idx"
-)
-info = image_list[st.session_state.selected_image_idx]
+# radio 绑定唯一 ID
+selected_idx = image_ids.index(st.session_state.selected_image_id)
+selected_label = st.sidebar.radio(T["select_image"], labels, index=selected_idx, key="selected_image_id")
+selected_idx = image_ids.index(st.session_state.selected_image_id)
+info = image_list[selected_idx]
 
-# ========= 主界面 =========
+# ====================== 主界面 ======================
 st.markdown(f"<h2>🧑‍⚕️ {selected_modality} {T['title']}</h2>", unsafe_allow_html=True)
 progress_val = len(rated_set)/len(image_list) if image_list else 0
 st.progress(progress_val, text=f"{T['progress']}：{len(rated_set)}/{len(image_list)}")
 
+# 加载图像
 try:
     img = Image.open(info["filepath"]).convert("RGB")
 except Exception as e:
@@ -192,8 +188,8 @@ except Exception as e:
 col1,col2 = st.columns([3,4], gap="large")
 with col1:
     st.subheader(T["preview"])
-    st.image(img, caption=f"{labels[st.session_state.selected_image_idx]} ({info['filename']})", use_container_width=True)
-    st.caption(f"{st.session_state.selected_image_idx+1}/{len(image_list)}")
+    st.image(img, caption=f"{labels[selected_idx]} ({info['filename']})", use_container_width=True)
+    st.caption(f"{selected_idx+1}/{len(image_list)}")
 
 with col2:
     st.subheader(T["score_title"])
@@ -206,9 +202,15 @@ with col2:
         ]
         ratings = {}
         for item in items:
-            key = f"{item['key']}_{st.session_state.selected_image_idx}"
-            st.markdown(f"**{item['name']}**")
-            ratings[item['key']] = st.slider(" ",1,5,value=st.session_state.get(key,3), key=key, label_visibility="collapsed")
+            key = f"{item['key']}_{st.session_state.selected_image_id}"
+            # 自动加载之前评分
+            prev_val = 3
+            if os.path.exists(SAVE_FILE):
+                df = pd.read_csv(SAVE_FILE, encoding="utf-8")
+                uid = st.session_state.selected_image_id
+                if uid in (df["filename"]+"_"+df["method"]).values:
+                    prev_val = int(df.loc[df["filename"]+"_"+df["method"]==uid, item['key']].values[0])
+            ratings[item['key']] = st.slider(" ", 1, 5, value=prev_val, key=key, label_visibility="collapsed")
             st.caption(item['desc'])
             st.markdown("---")
 
@@ -239,7 +241,7 @@ with col2:
             df.to_csv(SAVE_FILE,index=False,encoding="utf-8")
             st.toast(T["saved"], icon="✅")
 
-# ========= 数据下载 =========
+# ====================== 数据下载 ======================
 st.markdown("---")
 st.subheader(T["download_title"])
 if os.path.exists(SAVE_FILE):
