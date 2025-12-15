@@ -7,7 +7,6 @@ import re
 
 warnings.filterwarnings("ignore")
 
-# 页面配置
 st.set_page_config(
     page_title="图像多指标主观评分系统",
     layout="wide",
@@ -99,9 +98,14 @@ modalities = [m for m in sorted(os.listdir(IMAGE_ROOT)) if os.path.isdir(os.path
 selected_modality = st.selectbox(T["title"], modalities)
 
 # ====================== 初始化 SessionState ======================
-for key in ["user_name", "user_institution", "user_years", "selected_image_id"]:
+for key in ["user_name", "user_institution", "user_years", "selected_image_id", "prev_modality"]:
     if key not in st.session_state:
         st.session_state[key] = "" if "user" in key else None
+
+# 模态切换时重置选中图像
+if st.session_state.prev_modality != selected_modality:
+    st.session_state.selected_image_id = None
+    st.session_state.prev_modality = selected_modality
 
 # ====================== 用户信息输入 ======================
 st.markdown(f"### {T['rater_info']}")
