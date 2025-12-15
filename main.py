@@ -16,9 +16,45 @@ st.markdown(
     footer {visibility: hidden;}
     .deploy-status {visibility: hidden;}
     .stTextInput > div > div > input:focus { box-shadow: none; }
-    .stSelectbox > div > div > select:focus { box-shadow: none; }
-    .completed-item { background-color: #f0f9f0; border-left: 3px solid #22c55e; }
-    .pending-item { background-color: #f8fafc; border-left: 3px solid #64748b; }
+    .image-item {
+        border-radius: 8px;
+        padding: 10px;
+        margin-bottom: 8px;
+        cursor: pointer;
+        transition: all 0.2s ease;
+    }
+    .image-item:hover {
+        background-color: #f0f2f6;
+    }
+    .image-item.selected {
+        background-color: #e6f7ff;
+        border: 2px solid #1890ff;
+    }
+    .image-item.rated {
+        border-left: 4px solid #52c41a;
+    }
+    .image-thumbnail {
+        width: 100%;
+        height: 80px;
+        object-fit: cover;
+        border-radius: 4px;
+        margin-bottom: 4px;
+    }
+    .image-filename {
+        font-size: 0.85rem;
+        white-space: nowrap;
+        overflow: hidden;
+        text-overflow: ellipsis;
+    }
+    .image-method {
+        font-size: 0.75rem;
+        color: #666;
+    }
+    .scrollable-list {
+        max-height: calc(100vh - 300px);
+        overflow-y: auto;
+        padding-right: 8px;
+    }
     </style>
     """,
     unsafe_allow_html=True,
@@ -27,8 +63,8 @@ st.markdown(
 # ========= 页面配置 =========
 st.set_page_config(
     page_title="图像多指标主观评分系统",
-    layout="wide",
-    initial_sidebar_state="expanded",
+    layout="wide",  # 改为宽布局以适应左右分栏
+    initial_sidebar_state="collapsed",
 )
 
 # ========= 语言选择 =========
@@ -52,10 +88,9 @@ TEXT = {
         "progress": "当前进度",
         "preview": "图像预览",
         "score_title": "📊 评分指标",
-        "save": "💾 保存评分",
-        "saved": "✅ 评分已保存",
-        "updated": "✅ 评分已更新",
-        "finished": "🎉 所有图像已完成评分！",
+        "save_next": "💾 保存并下一张",
+        "saved": "✅ 已保存",
+        "finished": "🎉 您的评分已全部完成！",
         "download_title": "📥 我的评分数据",
         "download": "📤 下载 CSV",
         "no_data": "暂无评分数据",
@@ -64,19 +99,16 @@ TEXT = {
         "artifact": ("伪影", "1=多，5=少"),
         "naturalness": ("真实感", "1=不符合，5=符合"),
         "diagnostic": ("可诊断性", "1=不足，5=足够"),
-        "select_image": "🖼️ 选择要评分的图像",
-        "image_list": "图像列表",
-        "method": "方法",
-        "status": "状态",
-        "completed": "已完成",
-        "pending": "待评分",
-        "no_images": "暂无可用图像",
-        "current_image": "当前评分图像",
-        "edit_rating": "📝 修改历史评分",
-        "filter": "🔍 筛选",
-        "all": "全部",
-        "show_completed": "显示已完成",
-        "show_pending": "显示待评分"
+        "image_list": "📋 图像列表",
+        "total_images": "总图像数",
+        "completed_images": "已完成",
+        "filter_images": "筛选",
+        "all_images": "全部",
+        "unrated_images": "未评分",
+        "rated_images": "已评分",
+        "click_to_select": "点击选择图像进行评分",
+        "method_label": "方法：",
+        "selected_image": "当前选择：",
     },
     "English": {
         "title": "Multi-Metric Image Subjective Scoring System",
@@ -94,9 +126,8 @@ TEXT = {
         "progress": "Progress",
         "preview": "Image Preview",
         "score_title": "📊 Scoring Metrics",
-        "save": "💾 Save Rating",
-        "saved": "✅ Rating saved",
-        "updated": "✅ Rating updated",
+        "save_next": "💾 Save & Next",
+        "saved": "✅ Saved",
         "finished": "🎉 All images have been rated!",
         "download_title": "📥 My Rating Data",
         "download": "📤 Download CSV",
@@ -106,19 +137,16 @@ TEXT = {
         "artifact": ("Artifacts", "1=Many, 5=Few"),
         "naturalness": ("Naturalness", "1=Unrealistic, 5=Realistic"),
         "diagnostic": ("Diagnostic Confidence", "1=Low, 5=High"),
-        "select_image": "🖼️ Select Image to Rate",
-        "image_list": "Image List",
-        "method": "Method",
-        "status": "Status",
-        "completed": "Completed",
-        "pending": "Pending",
-        "no_images": "No images available",
-        "current_image": "Current Image",
-        "edit_rating": "📝 Edit Previous Rating",
-        "filter": "🔍 Filter",
-        "all": "All",
-        "show_completed": "Show Completed",
-        "show_pending": "Show Pending"
+        "image_list": "📋 Image List",
+        "total_images": "Total Images",
+        "completed_images": "Completed",
+        "filter_images": "Filter",
+        "all_images": "All",
+        "unrated_images": "Unrated",
+        "rated_images": "Rated",
+        "click_to_select": "Click to select image for rating",
+        "method_label": "Method:",
+        "selected_image": "Currently Selected:",
     },
 }
 
@@ -162,16 +190,16 @@ if not modalities:
 selected_modality = st.selectbox(T["select_modality"], modalities)
 
 # ========= 初始化 SessionState =========
+if "idx" not in st.session_state:
+    st.session_state.idx = 0
 if "user_name" not in st.session_state:
     st.session_state.user_name = ""
 if "user_institution" not in st.session_state:
     st.session_state.user_institution = ""
 if "user_years" not in st.session_state:
     st.session_state.user_years = ""
-if "selected_image_id" not in st.session_state:
-    st.session_state.selected_image_id = None
-if "filter_status" not in st.session_state:
-    st.session_state.filter_status = "all"
+if "image_filter" not in st.session_state:
+    st.session_state.image_filter = "all"  # all, unrated, rated
 
 # ========= 用户信息输入 =========
 st.markdown(f"### {T['rater_info']}")
@@ -269,63 +297,53 @@ elif SAVE_FILE and os.path.exists(SAVE_FILE):
     df_exist.to_csv(SAVE_FILE, index=False, encoding="utf-8")
 
 # ========= 加载图像列表 =========
-def load_all_images(modality_path):
-    """加载所有图像并生成唯一ID"""
-    image_list = []
-    for method in sorted(os.listdir(modality_path)):
-        method_path = os.path.join(modality_path, method)
-        if not os.path.isdir(method_path):
-            continue
-        for f in sorted(os.listdir(method_path)):
-            if f.lower().endswith((".jpg", ".jpeg", ".png")):
-                image_id = f"{method}_{f}"  # 唯一标识
-                image_list.append(
-                    {
-                        "id": image_id,
-                        "modality": selected_modality,
-                        "method": method,
-                        "filename": f,
-                        "filepath": os.path.normpath(os.path.join(method_path, f)),
-                        "status": "pending"  # 默认待评分
-                    }
-                )
-    return image_list
-
-# 加载所有图像
+image_list = []
 modality_path = os.path.join(IMAGE_ROOT, selected_modality)
-all_images = load_all_images(modality_path)
 
-if not all_images:
+for method in sorted(os.listdir(modality_path)):
+    method_path = os.path.join(modality_path, method)
+    if not os.path.isdir(method_path):
+        continue
+    for f in sorted(os.listdir(method_path)):
+        if f.lower().endswith((".jpg", ".jpeg", ".png")):
+            image_id = f"{method}_{f}"  # 唯一标识
+            image_list.append(
+                {
+                    "id": image_id,
+                    "modality": selected_modality,
+                    "method": method,
+                    "filename": f,
+                    "filepath": os.path.normpath(os.path.join(method_path, f)),
+                }
+            )
+
+if not image_list:
     st.error(f"❌ 模态 {selected_modality} 下未找到图片！")
     st.stop()
 
-# ========= 加载已评分数据 =========
-rated_data = {}  # 存储已评分数据，key: image_id, value: 评分字典
-df_rated = pd.DataFrame(columns=COLUMNS)
-
+# ========= 获取已评分图像集合 =========
+rated_set = set()
 if SAVE_FILE and os.path.exists(SAVE_FILE):
     df_rated = pd.read_csv(SAVE_FILE, encoding="utf-8").fillna("")
     if not df_rated.empty:
-        # 更新图像状态
-        for img in all_images:
-            mask = (df_rated["method"] == img["method"]) & (df_rated["filename"] == img["filename"])
-            if mask.any():
-                img["status"] = "completed"
-                # 存储评分数据
-                rated_row = df_rated[mask].iloc[0]
-                rated_data[img["id"]] = {
-                    "sharpness": int(rated_row["sharpness"]) if rated_row["sharpness"] != "" else 3,
-                    "artifact": int(rated_row["artifact"]) if rated_row["artifact"] != "" else 3,
-                    "naturalness": int(rated_row["naturalness"]) if rated_row["naturalness"] != "" else 3,
-                    "diagnostic_confidence": int(rated_row["diagnostic_confidence"]) if rated_row["diagnostic_confidence"] != "" else 3,
-                }
+        rated_set = set(df_rated["filename"] + "_" + df_rated["method"])
 
-# ========= 计算进度 =========
-total_images = len(all_images)
-completed_count = sum(1 for img in all_images if img["status"] == "completed")
-progress = completed_count / total_images if total_images > 0 else 0
+# ========= 筛选图像列表 =========
+def filter_images(images, filter_type, rated_set):
+    if filter_type == "all":
+        return images
+    elif filter_type == "rated":
+        return [img for img in images if f"{img['filename']}_{img['method']}" in rated_set]
+    elif filter_type == "unrated":
+        return [img for img in images if f"{img['filename']}_{img['method']}" not in rated_set]
+    return images
 
-# ========= 主界面标题 =========
+# ========= 确保当前选中的图像有效 =========
+current_image_id = image_list[st.session_state.idx]["id"] if image_list else ""
+if st.session_state.idx >= len(image_list) or st.session_state.idx < 0:
+    st.session_state.idx = 0
+
+# ========= 主页面布局 =========
 st.markdown(
     f"""
     <h2>🧑‍⚕️ {selected_modality} {T['title']}</h2>
@@ -337,193 +355,264 @@ st.markdown(
 )
 
 # 进度条
-st.progress(progress, text=f"{T['progress']}：{completed_count}/{total_images}（{progress:.1%}）")
+total = len(image_list)
+completed = len(rated_set)
+progress = completed / total if total > 0 else 0
+st.progress(progress, text=f"{T['progress']}：{completed}/{total}（{progress:.1%}）")
 
-if completed_count == total_images:
-    st.success(T["finished"])
-    st.balloons()
+# 左右分栏：左侧图像列表，右侧评分区域
+col_list, col_main = st.columns([1, 2.5], gap="large")
 
-# ========= 主要内容区 =========
-col_sidebar, col_main = st.columns([1, 3], gap="large")
-
-with col_sidebar:
+with col_list:
     st.subheader(T["image_list"])
+    st.caption(T["click_to_select"])
     
     # 筛选器
-    filter_option = st.radio(
-        T["filter"],
-        [T["all"], T["show_pending"], T["show_completed"]],
-        index=0,
-        key="image_filter"
-    )
-    
-    # 根据筛选条件过滤图像
-    filtered_images = []
-    if filter_option == T["show_pending"]:
-        filtered_images = [img for img in all_images if img["status"] == "pending"]
-    elif filter_option == T["show_completed"]:
-        filtered_images = [img for img in all_images if img["status"] == "completed"]
-    else:
-        filtered_images = all_images
-    
-    # 图像选择下拉框
-    if filtered_images:
-        # 生成选项：显示状态、方法、文件名
-        options = []
-        for img in filtered_images:
-            status_text = T["completed"] if img["status"] == "completed" else T["pending"]
-            status_color = "✅" if img["status"] == "completed" else "⏳"
-            option_text = f"{status_color} {img['method']} - {img['filename']}"
-            options.append(option_text)
-        
-        selected_idx = st.selectbox(
-            T["select_image"],
-            range(len(filtered_images)),
-            format_func=lambda i: options[i],
-            key="image_selector"
+    filter_col1, filter_col2 = st.columns(2)
+    with filter_col1:
+        st.caption(T["filter_images"])
+    with filter_col2:
+        image_filter = st.selectbox(
+            "",
+            [T["all_images"], T["unrated_images"], T["rated_images"]],
+            index=["all", "unrated", "rated"].index(st.session_state.image_filter),
+            label_visibility="collapsed",
+            key="image_filter_select"
         )
         
-        selected_image = filtered_images[selected_idx]
-        st.session_state.selected_image_id = selected_image["id"]
-    else:
-        st.info(T["no_images"])
-        selected_image = None
+        # 更新筛选状态
+        if image_filter == T["all_images"]:
+            st.session_state.image_filter = "all"
+        elif image_filter == T["unrated_images"]:
+            st.session_state.image_filter = "unrated"
+        elif image_filter == T["rated_images"]:
+            st.session_state.image_filter = "rated"
+    
+    st.markdown("---")
+    
+    # 筛选后的图像列表
+    filtered_images = filter_images(image_list, st.session_state.image_filter, rated_set)
+    
+    # 显示统计信息
+    st.caption(f"{T['total_images']}: {len(filtered_images)}")
+    st.caption(f"{T['completed_images']}: {len([img for img in filtered_images if f"{img['filename']}_{img['method']}" in rated_set])}")
+    
+    st.markdown("---")
+    
+    # 可滚动的图像列表
+    with st.container():
+        st.markdown('<div class="scrollable-list">', unsafe_allow_html=True)
+        
+        for i, img_info in enumerate(filtered_images):
+            is_rated = f"{img_info['filename']}_{img_info['method']}" in rated_set
+            is_selected = img_info["id"] == image_list[st.session_state.idx]["id"]
+            
+            # 图像缩略图
+            try:
+                thumbnail = Image.open(img_info["filepath"])
+                if thumbnail.mode == "RGBA":
+                    thumbnail = thumbnail.convert("RGB")
+                # 调整缩略图大小
+                thumbnail.thumbnail((150, 100))
+            except:
+                thumbnail = None
+            
+            # 图像项容器
+            item_class = "image-item"
+            if is_selected:
+                item_class += " selected"
+            if is_rated:
+                item_class += " rated"
+            
+            st.markdown(f'<div class="{item_class}" id="img_{img_info["id"]}">', unsafe_allow_html=True)
+            
+            # 显示缩略图
+            if thumbnail:
+                st.image(thumbnail, use_container_width=True, output_format="PNG", caption="", key=f"thumb_{img_info['id']}")
+            else:
+                st.markdown('<div style="height:80px; background:#f5f5f5; border-radius:4px; display:flex; align-items:center; justify-content:center; color:#999;">📷</div>', unsafe_allow_html=True)
+            
+            # 显示文件名和方法
+            st.markdown(f'<div class="image-filename">{img_info["filename"]}</div>', unsafe_allow_html=True)
+            st.markdown(f'<div class="image-method">{T["method_label"]} {img_info["method"]}</div>', unsafe_allow_html=True)
+            
+            # 显示状态标签
+            if is_rated:
+                st.markdown('<span style="color:#52c41a; font-size:0.7rem;">✅ 已评分</span>', unsafe_allow_html=True)
+            else:
+                st.markdown('<span style="color:#faad14; font-size:0.7rem;">⏳ 未评分</span>', unsafe_allow_html=True)
+            
+            st.markdown('</div>', unsafe_allow_html=True)
+            
+            # 点击事件：通过按钮模拟（Streamlit没有直接的div点击事件）
+            if st.button(
+                "select",
+                key=f"btn_{img_info['id']}",
+                label_visibility="collapsed",
+                style={"display": "none"}  # 隐藏实际按钮
+            ):
+                # 找到原始列表中的索引
+                original_idx = next((idx for idx, img in enumerate(image_list) if img["id"] == img_info["id"]), 0)
+                st.session_state.idx = original_idx
+                st.rerun()
+            
+            # 添加分隔线
+            if i < len(filtered_images) - 1:
+                st.markdown('<hr style="margin:8px 0; border-color:#eee;">', unsafe_allow_html=True)
+        
+        st.markdown('</div>', unsafe_allow_html=True)
 
 with col_main:
-    if selected_image:
-        st.subheader(T["current_image"])
+    # 显示当前选择的图像信息
+    current_img = image_list[st.session_state.idx]
+    st.markdown(f"<p style='color:#666;'>{T['selected_image']} {current_img['filename']} ({current_img['method']})</p>", unsafe_allow_html=True)
+    
+    # 检查是否所有图像都已评分
+    if completed == total:
+        st.success(T["finished"])
+        st.balloons()
+    else:
+        # 加载并显示当前图像
+        try:
+            img = Image.open(current_img["filepath"])
+            if img.mode == "RGBA":
+                img = img.convert("RGB")
+        except Exception as e:
+            st.error(f"❌ 图片加载失败：{current_img['filename']} | {e}")
+            # 自动跳转到下一张
+            st.session_state.idx = (st.session_state.idx + 1) % len(image_list)
+            st.rerun()
         
-        # 显示图像信息
-        col_info1, col_info2, col_info3 = st.columns(3)
-        with col_info1:
-            st.metric(T["method"], selected_image["method"])
-        with col_info2:
-            status_text = T["completed"] if selected_image["status"] == "completed" else T["pending"]
-            st.metric(T["status"], status_text)
-        with col_info3:
-            st.metric("ID", selected_image["id"][:20] + "..." if len(selected_image["id"]) > 20 else selected_image["id"])
+        # 图像预览区域
+        st.subheader(T["preview"])
+        st.image(img, caption=current_img["filename"], use_container_width=True)
+        st.caption(f"[{st.session_state.idx + 1}/{total}] {T['method_label']} {current_img['method']}")
         
         st.markdown("---")
         
-        # 图像预览和评分区
-        col_preview, col_rating = st.columns([2, 2], gap="large")
+        # 评分区域
+        st.subheader(T["score_title"])
+        items = [
+            ("sharpness", *T["sharpness"]),
+            ("artifact", *T["artifact"]),
+            ("naturalness", *T["naturalness"]),
+            ("diagnostic_confidence", *T["diagnostic"]),
+        ]
+        ratings = {}
         
-        with col_preview:
-            st.subheader(T["preview"])
-            try:
-                img = Image.open(selected_image["filepath"])
-                if img.mode == "RGBA":
-                    img = img.convert("RGB")
-                st.image(img, caption=selected_image["filename"], use_container_width=True)
-            except Exception as e:
-                st.error(f"❌ 图片加载失败：{selected_image['filename']} | {e}")
+        for k, name, desc in items:
+            st.markdown(f"**{name}**")
+            # 检查是否已评分，如果已评分则显示之前的分数
+            default_value = 3
+            if SAVE_FILE and os.path.exists(SAVE_FILE):
+                df_rated = pd.read_csv(SAVE_FILE, encoding="utf-8").fillna("")
+                mask = (df_rated["filename"] == current_img["filename"]) & (df_rated["method"] == current_img["method"])
+                if not df_rated[mask].empty:
+                    rated_value = df_rated[mask][k].iloc[0]
+                    if isinstance(rated_value, (int, float)) and not pd.isna(rated_value):
+                        default_value = int(rated_value)
+            
+            ratings[k] = st.slider(
+                " ", 1, 5, default_value, 
+                key=f"{k}_{current_img['id']}", 
+                label_visibility="collapsed"
+            )
+            st.caption(desc)
+            st.markdown("---")
         
-        with col_rating:
-            st.subheader(T["score_title"])
-            
-            # 获取已有的评分（如果存在）
-            default_ratings = rated_data.get(selected_image["id"], {
-                "sharpness": 3,
-                "artifact": 3,
-                "naturalness": 3,
-                "diagnostic_confidence": 3
-            })
-            
-            # 评分滑块
-            items = [
-                ("sharpness", *T["sharpness"]),
-                ("artifact", *T["artifact"]),
-                ("naturalness", *T["naturalness"]),
-                ("diagnostic_confidence", *T["diagnostic"]),
-            ]
-            
-            ratings = {}
-            for k, name, desc in items:
-                st.markdown(f"**{name}**")
-                ratings[k] = st.slider(
-                    " ", 
-                    min_value=1, 
-                    max_value=5, 
-                    value=default_ratings[k],
-                    key=f"{k}_{selected_image['id']}", 
-                    label_visibility="collapsed"
-                )
-                st.caption(desc)
-                st.markdown("---")
-            
-            # 保存评分按钮
-            if st.button(T["save"], type="primary", use_container_width=True):
-                # 准备数据行
-                new_row = {
-                    "name": user_name,
-                    "institution": user_institution,
-                    "years_of_experience": user_years,
-                    "modality": selected_image["modality"],
-                    "method": selected_image["method"],
-                    "filename": selected_image["filename"],
-                    **ratings,
-                }
-                
-                # 读取现有数据
-                df = pd.read_csv(SAVE_FILE, encoding="utf-8")
-                
-                # 检查是否已存在该图像的评分
-                mask = (df["method"] == selected_image["method"]) & (df["filename"] == selected_image["filename"])
-                
-                if mask.any():
-                    # 更新现有评分
-                    df.loc[mask, list(ratings.keys())] = pd.Series(ratings)
-                    df.loc[mask, ["name", "institution", "years_of_experience"]] = [
-                        user_name, user_institution, user_years
-                    ]
-                    message = T["updated"]
+        # 保存按钮
+        col_btn1, col_btn2, col_btn3 = st.columns([1, 2, 1])
+        with col_btn2:
+            if st.button(T["save_next"], type="primary", use_container_width=True):
+                # 检查是否已存在该图像的评分，如果存在则更新，否则添加
+                if SAVE_FILE and os.path.exists(SAVE_FILE):
+                    df = pd.read_csv(SAVE_FILE, encoding="utf-8")
+                    mask = (df["filename"] == current_img["filename"]) & (df["method"] == current_img["method"])
+                    
+                    row = {
+                        "name": user_name,
+                        "institution": user_institution,
+                        "years_of_experience": user_years,
+                        "modality": current_img["modality"],
+                        "method": current_img["method"],
+                        "filename": current_img["filename"],
+                        **ratings,
+                    }
+                    
+                    if not df[mask].empty:
+                        # 更新现有评分
+                        df.loc[mask, list(ratings.keys())] = list(ratings.values())
+                        df.to_csv(SAVE_FILE, index=False, encoding="utf-8")
+                    else:
+                        # 添加新评分
+                        pd.DataFrame([row]).to_csv(
+                            SAVE_FILE, mode="a", header=False, index=False, encoding="utf-8"
+                        )
                 else:
-                    # 添加新评分
-                    df = pd.concat([df, pd.DataFrame([new_row])], ignore_index=True)
-                    message = T["saved"]
+                    # 保存新评分
+                    row = {
+                        "name": user_name,
+                        "institution": user_institution,
+                        "years_of_experience": user_years,
+                        "modality": current_img["modality"],
+                        "method": current_img["method"],
+                        "filename": current_img["filename"],
+                        **ratings,
+                    }
+                    pd.DataFrame([row]).to_csv(SAVE_FILE, mode="a", header=False, index=False, encoding="utf-8")
                 
-                # 保存到CSV
-                df.to_csv(SAVE_FILE, index=False, encoding="utf-8")
+                st.toast(T["saved"], icon="✅")
                 
-                # 更新内存中的评分数据
-                rated_data[selected_image["id"]] = ratings
-                selected_image["status"] = "completed"
+                # 自动跳转到下一张未评分的图像
+                next_idx = (st.session_state.idx + 1) % len(image_list)
+                current_filter = st.session_state.image_filter
                 
-                # 显示成功消息并刷新
-                st.toast(message, icon="✅")
+                if current_filter == "unrated":
+                    # 在未评分列表中找下一张
+                    unrated_images = [i for i, img in enumerate(image_list) if f"{img['filename']}_{img['method']}" not in rated_set]
+                    if unrated_images:
+                        current_pos = unrated_images.index(st.session_state.idx) if st.session_state.idx in unrated_images else -1
+                        next_pos = (current_pos + 1) % len(unrated_images)
+                        next_idx = unrated_images[next_pos]
+                
+                st.session_state.idx = next_idx
                 st.rerun()
-    else:
-        st.info(T["no_images"])
 
-# ========= 数据下载区 =========
+# ========= 数据下载 =========
 st.markdown("---")
 st.subheader(T["download_title"])
-
 if SAVE_FILE and os.path.exists(SAVE_FILE):
-    df_download = pd.read_csv(SAVE_FILE, encoding="utf-8")
-    if not df_download.empty:
-        st.dataframe(df_download, use_container_width=True)
-        
-        # 统计信息
-        st.markdown("### 📈 统计摘要")
-        col_stats1, col_stats2, col_stats3 = st.columns(3)
-        with col_stats1:
-            st.metric(T["progress"], f"{completed_count}/{total_images}")
-        with col_stats2:
-            st.metric("平均清晰度", f"{df_download['sharpness'].mean():.2f}")
-        with col_stats3:
-            st.metric("平均可诊断性", f"{df_download['diagnostic_confidence'].mean():.2f}")
-        
-        # 下载按钮
-        with open(SAVE_FILE, "rb") as f:
-            st.download_button(
-                T["download"],
-                data=f,
-                file_name=os.path.basename(SAVE_FILE),
-                mime="text/csv",
-                use_container_width=True,
-            )
-    else:
-        st.info(T["no_data"])
+    df = pd.read_csv(SAVE_FILE, encoding="utf-8")
+    st.dataframe(df.drop(columns=["method"]), use_container_width=True)
+    with open(SAVE_FILE, "rb") as f:
+        st.download_button(
+            T["download"],
+            data=f,
+            file_name=os.path.basename(SAVE_FILE),
+            mime="text/csv",
+            use_container_width=True,
+        )
 else:
     st.info(T["no_data"])
+
+# ========= 点击列表项的JavaScript处理 =========
+st.markdown(
+    """
+    <script>
+    // 为每个图像项添加点击事件
+    document.addEventListener('DOMContentLoaded', function() {
+        const imageItems = document.querySelectorAll('.image-item');
+        imageItems.forEach(item => {
+            item.addEventListener('click', function() {
+                const imgId = this.id.split('_')[1];
+                const button = document.querySelector(`button[data-testid="stButton"][key="btn_${imgId}"]`);
+                if (button) {
+                    button.click();
+                }
+            });
+        });
+    });
+    </script>
+    """,
+    unsafe_allow_html=True,
+)
