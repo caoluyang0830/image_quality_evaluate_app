@@ -158,6 +158,7 @@ else:
 # ====================== 左侧图像列表 ======================
 st.sidebar.subheader(T["image_list"])
 image_ids = [f"{img['filename']}_{img['method']}" for img in image_list]
+
 labels = []
 for idx, uid in enumerate(image_ids):
     label = f"图像{idx+1}" if LANG=="中文" else f"Image {idx+1}"
@@ -168,10 +169,16 @@ for idx, uid in enumerate(image_ids):
 if st.session_state.selected_image_id not in image_ids:
     st.session_state.selected_image_id = image_ids[0]
 
-# radio 绑定唯一 ID
-selected_idx = image_ids.index(st.session_state.selected_image_id)
-selected_label = st.sidebar.radio(T["select_image"], labels, index=selected_idx, key="selected_image_id")
-selected_idx = image_ids.index(st.session_state.selected_image_id)
+# radio 使用 value 而非 index，绑定唯一 ID
+selected_id = st.sidebar.radio(
+    T["select_image"],
+    options=image_ids,
+    format_func=lambda uid: labels[image_ids.index(uid)],
+    key="selected_image_id"
+)
+
+# 获取选中图像信息
+selected_idx = image_ids.index(selected_id)
 info = image_list[selected_idx]
 
 # ====================== 主界面 ======================
@@ -202,12 +209,12 @@ with col2:
         ]
         ratings = {}
         for item in items:
-            key = f"{item['key']}_{st.session_state.selected_image_id}"
+            key = f"{item['key']}_{selected_id}"
             # 自动加载之前评分
             prev_val = 3
             if os.path.exists(SAVE_FILE):
                 df = pd.read_csv(SAVE_FILE, encoding="utf-8")
-                uid = st.session_state.selected_image_id
+                uid = selected_id
                 if uid in (df["filename"]+"_"+df["method"]).values:
                     prev_val = int(df.loc[df["filename"]+"_"+df["method"]==uid, item['key']].values[0])
             ratings[item['key']] = st.slider(" ", 1, 5, value=prev_val, key=key, label_visibility="collapsed")
