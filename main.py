@@ -145,7 +145,7 @@ st.markdown(f"### {T['rater_info']}")
 col_name, col_inst, col_years = st.columns(3, gap="medium")
 
 with col_name:
-    st.markdown(f"**{T['name']}**")  # 小标题
+    st.caption(T['name'])  # 小标题
     user_name = st.text_input(
         "",
         value=st.session_state.user_name,
@@ -156,7 +156,7 @@ with col_name:
     st.session_state.user_name = user_name
 
 with col_inst:
-    st.markdown(f"**{T['institution']}**")  # 小标题
+    st.caption(T['institution'])
     user_institution = st.text_input(
         "",
         value=st.session_state.user_institution,
@@ -167,7 +167,7 @@ with col_inst:
     st.session_state.user_institution = user_institution
 
 with col_years:
-    st.markdown(f"**{T['years']}**")  # 小标题
+    st.caption(T['years'])
     user_years_input = st.text_input(
         "",
         value=st.session_state.user_years,
