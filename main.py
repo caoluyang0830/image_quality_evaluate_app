@@ -186,30 +186,29 @@ if not image_list:
     st.error(f"❌ 模态 {selected_modality} 下未找到图片！")
     st.stop()
 
-# ========= 左侧图像列表（每行显示） =========
-st.sidebar.subheader("📂 图像列表")
-
-# 已评分集合
+# ========= 已评分集合 =========
 if os.path.exists(SAVE_FILE):
     df_rated = pd.read_csv(SAVE_FILE, encoding="utf-8")
     rated_set = set(df_rated["filename"] + "_" + df_rated["method"])
 else:
     rated_set = set()
 
+# ========= 左侧图像列表（radio） =========
+st.sidebar.subheader("📂 图像列表")
+labels = []
 for idx, img_info in enumerate(image_list):
     uid = f"{img_info['filename']}_{img_info['method']}"
     label = f"图像{idx+1}"
     if uid in rated_set:
         label += " ✅"
-    if st.sidebar.button(label):
-        st.session_state.selected_image_idx = idx
-        st.experimental_rerun()
+    labels.append(label)
 
+selected_label = st.sidebar.radio("选择图像", labels, index=st.session_state.selected_image_idx)
+st.session_state.selected_image_idx = labels.index(selected_label)
 info = image_list[st.session_state.selected_image_idx]
 
 # ========= 主界面 =========
 st.markdown(f"<h2>🧑‍⚕️ {selected_modality} {T['title']}</h2>", unsafe_allow_html=True)
-
 progress_val = len(rated_set)/len(image_list) if image_list else 0
 st.progress(progress_val, text=f"{T['progress']}：{len(rated_set)}/{len(image_list)}")
 
@@ -234,7 +233,6 @@ with col2:
         key = f"{metric}_{st.session_state.selected_image_idx}"
         ratings[metric] = st.slider(metric, 1, 5, value=st.session_state.get(key, 3), key=key)
 
-    # ===== 保存并覆盖已评分行 =====
     if st.button(T["save_next"], type="primary", use_container_width=True):
         row = {
             "name": user_name,
@@ -245,8 +243,7 @@ with col2:
             "filename": info["filename"],
             **ratings
         }
-
-        # 读取 CSV
+        # 保存 CSV（覆盖已评分行）
         if os.path.exists(SAVE_FILE):
             df = pd.read_csv(SAVE_FILE, encoding="utf-8")
         else:
@@ -267,10 +264,6 @@ with col2:
 
         df.to_csv(SAVE_FILE, index=False, encoding="utf-8")
         st.toast(T["saved"], icon="✅")
-
-        # 跳到下一张
-        st.session_state.selected_image_idx = min(st.session_state.selected_image_idx + 1, len(image_list)-1)
-        st.experimental_rerun()
 
 # ========= 数据下载 =========
 st.markdown("---")
