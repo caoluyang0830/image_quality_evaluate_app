@@ -28,12 +28,10 @@ st.set_page_config(
 )
 
 # ========= 语言选择 =========
-# 确保LANG在session_state中且为有效类型
 if "LANG" not in st.session_state or st.session_state["LANG"] not in ["中文", "English"]:
     st.session_state["LANG"] = "中文"
 
 def update_lang():
-    # 切换语言时重置图像选择索引，确保是整数
     st.session_state["selected_image_idx"] = 0
 
 LANG = st.selectbox("🌐 Language / 语言", ["中文", "English"], 
@@ -75,7 +73,8 @@ TEXT = {
         "no_modalities": "未找到任何模态文件夹",
         "go_next": "前往下一张",
         "go_prev": "返回上一张",
-        "init_error": "初始化失败，请刷新页面重试"
+        "init_error": "初始化失败，请刷新页面重试",
+        "duplicate_warn": "⚠️ 发现重复评分记录，已自动保留最新一条"
     },
     "English": {
         "title": "Multi-Metric Image Subjective Scoring System",
@@ -110,7 +109,8 @@ TEXT = {
         "no_modalities": "No modality folders found",
         "go_next": "Go to next",
         "go_prev": "Go to previous",
-        "init_error": "Initialization failed, please refresh the page and try again"
+        "init_error": "Initialization failed, please refresh the page and try again",
+        "duplicate_warn": "⚠️ Duplicate rating records found, automatically keeping the latest one"
     }
 }
 
@@ -133,12 +133,10 @@ if not modalities:
     st.error(f"❌ {T['no_modalities']}")
     st.stop()
 
-# 初始化模态选择状态
 if "selected_modality" not in st.session_state or st.session_state["selected_modality"] not in modalities:
     st.session_state["selected_modality"] = modalities[0]
 
 def update_modality():
-    # 切换模态时重置图像选择索引，确保是整数
     st.session_state["selected_image_idx"] = 0
 
 selected_modality = st.selectbox(T["modality_select"], modalities,
@@ -150,12 +148,8 @@ st.session_state["selected_modality"] = selected_modality
 required_keys = ["user_name", "user_institution", "user_years", "selected_image_idx"]
 for key in required_keys:
     if key not in st.session_state:
-        if "user" in key:
-            st.session_state[key] = ""
-        else:
-            st.session_state[key] = 0  # 确保是整数类型
+        st.session_state[key] = "" if "user" in key else 0
     else:
-        # 确保selected_image_idx是整数
         if key == "selected_image_idx" and not isinstance(st.session_state[key], int):
             st.session_state[key] = 0
 
@@ -166,12 +160,12 @@ with col_name:
     st.caption(T['name'])
     user_name = st.text_input("name_input", value=st.session_state.user_name, 
                              placeholder=T["name"], label_visibility="collapsed")
-    st.session_state.user_name = user_name.strip()  # 去除前后空格
+    st.session_state.user_name = user_name.strip()
 with col_inst:
     st.caption(T['institution'])
     user_institution = st.text_input("inst_input", value=st.session_state.user_institution, 
                                     placeholder=T["institution"], label_visibility="collapsed")
-    st.session_state.user_institution = user_institution.strip()  # 去除前后空格
+    st.session_state.user_institution = user_institution.strip()
 with col_years:
     st.caption(T['years'])
     user_years_input = st.text_input("years_input", value=st.session_state.user_years, 
@@ -211,27 +205,31 @@ if not valid_user_info:
 
 # ========= 用户专属 CSV =========
 def sanitize_filename(name):
-    """安全处理文件名，避免特殊字符问题"""
     return re.sub(r'[\\/:*?"<>|]', '_', name).strip() or "unknown_user"
 
 SAVE_FILE = os.path.normpath(f"{sanitize_filename(selected_modality)}_{sanitize_filename(st.session_state.user_name)}_ratings.csv")
 COLUMNS = ["name", "institution", "years_of_experience", "modality", "method", 
           "filename", "sharpness", "artifact", "naturalness", "diagnostic_confidence",
-          "rating_time"]  # 增加评分时间列
+          "rating_time"]
 
 # 确保CSV文件存在且格式正确
 if not os.path.exists(SAVE_FILE):
-    pd.DataFrame(columns=COLUMNS).to_csv(SAVE_FILE, index=False, encoding="utf-8-sig")  # 使用utf-8-sig支持中文
+    pd.DataFrame(columns=COLUMNS).to_csv(SAVE_FILE, index=False, encoding="utf-8-sig")
 else:
-    # 检查CSV列是否完整
     try:
         df_existing = pd.read_csv(SAVE_FILE, encoding="utf-8-sig")
         missing_cols = [col for col in COLUMNS if col not in df_existing.columns]
         if missing_cols:
-            # 添加缺失的列
             for col in missing_cols:
                 df_existing[col] = "" if col == "rating_time" else 0
-            df_existing.to_csv(SAVE_FILE, index=False, encoding="utf-8-sig")
+        # 关键修复1：去重，按filename+method保留最后一条记录
+        if not df_existing.empty:
+            initial_count = len(df_existing)
+            # 按filename和method分组，保留最后一条（最新的）记录
+            df_existing = df_existing.drop_duplicates(subset=["filename", "method"], keep="last").reset_index(drop=True)
+            if len(df_existing) < initial_count:
+                st.warning(T["duplicate_warn"])
+                df_existing.to_csv(SAVE_FILE, index=False, encoding="utf-8-sig")
     except Exception as e:
         st.error(f"❌ CSV文件损坏，正在创建新文件: {e}")
         pd.DataFrame(columns=COLUMNS).to_csv(SAVE_FILE, index=False, encoding="utf-8-sig")
@@ -240,17 +238,14 @@ else:
 image_list = []
 modality_path = os.path.join(IMAGE_ROOT, selected_modality)
 try:
-    # 确保路径存在
     if os.path.exists(modality_path):
         for method in sorted(os.listdir(modality_path)):
             method_path = os.path.join(modality_path, method)
             if not os.path.isdir(method_path):
                 continue
-            # 获取所有支持的图片格式
             for f in sorted(os.listdir(method_path)):
                 if f.lower().endswith((".jpg", ".jpeg", ".png", ".bmp", ".tiff")):
                     filepath = os.path.join(method_path, f)
-                    # 检查文件是否可读且不为空
                     if os.path.exists(filepath) and os.path.getsize(filepath) > 0:
                         image_list.append({
                             "modality": selected_modality,
@@ -268,33 +263,28 @@ if not image_list:
     st.error(f"❌ {T['no_data']} in {selected_modality}!")
     st.stop()
 
-# ========= 关键修复：确保selected_image_idx是整数且在有效范围内 =========
+# ========= 确保selected_image_idx有效 =========
 try:
-    # 强制转换为整数
     selected_idx = int(st.session_state.selected_image_idx)
-    # 确保索引在有效范围内
     if selected_idx < 0 or selected_idx >= len(image_list):
         selected_idx = 0
-    # 更新session_state
     st.session_state.selected_image_idx = selected_idx
 except (ValueError, TypeError):
-    # 如果转换失败，重置为0
     st.session_state.selected_image_idx = 0
 
 # ========= 已评分集合 =========
 rated_set = set()
+df_rated = pd.DataFrame(columns=COLUMNS)
 try:
     df_rated = pd.read_csv(SAVE_FILE, encoding="utf-8-sig")
-    # 清理无效数据
-    df_rated = df_rated.dropna(subset=["filename", "method"])
-    # 确保filename和method是字符串类型
+    # 再次去重，确保安全性
+    df_rated = df_rated.drop_duplicates(subset=["filename", "method"], keep="last").reset_index(drop=True)
     df_rated["filename"] = df_rated["filename"].astype(str)
     df_rated["method"] = df_rated["method"].astype(str)
     rated_set = set(df_rated["filename"] + "_" + df_rated["method"])
 except Exception as e:
     st.warning(f"⚠️ 读取已评分数据失败，重新开始: {str(e)}")
     rated_set = set()
-    pd.DataFrame(columns=COLUMNS).to_csv(SAVE_FILE, index=False, encoding="utf-8-sig")
 
 # ========= 左侧图像列表 =========
 st.sidebar.subheader(T["image_list"])
@@ -302,12 +292,12 @@ labels = []
 for idx, img_info in enumerate(image_list):
     uid = f"{img_info['filename']}_{img_info['method']}"
     label = f"图像{idx+1}" if LANG == "中文" else f"Image {idx+1}"
-    label += f" - {img_info['method']}"  # 显示方法名称
+    label += f" - {img_info['method']}"
     if uid in rated_set:
         label += " ✅"
     labels.append(label)
 
-# 图像选择单选框 - 确保index是有效的整数
+# 图像选择单选框
 current_idx = st.session_state.selected_image_idx
 if current_idx >= len(labels):
     current_idx = 0
@@ -317,10 +307,9 @@ selected_label = st.sidebar.radio(
     T["select_image"],
     labels,
     index=current_idx,
-    key="selected_image_idx_radio"  # 使用不同的key避免冲突
+    key="selected_image_idx_radio"
 )
 
-# 更新session_state中的索引
 st.session_state.selected_image_idx = labels.index(selected_label) if selected_label in labels else 0
 current_idx = st.session_state.selected_image_idx
 
@@ -352,7 +341,6 @@ st.markdown(f"<h2>🧑‍⚕️ {selected_modality} - {T['title']}</h2>", unsafe
 progress_val = len(rated_set) / len(image_list) if image_list else 0
 st.progress(progress_val, text=f"{T['progress']}：{len(rated_set)}/{len(image_list)} ({progress_val:.1%})")
 
-# 检查是否所有图像都已评分
 if len(rated_set) == len(image_list) and len(image_list) > 0:
     st.success(T["finished"], icon="🎉")
 
@@ -362,11 +350,8 @@ try:
     img = Image.open(info["filepath"]).convert("RGB")
 except Exception as e:
     st.error(f"❌ {T['image_load_fail']}: {info['filename']} | {str(e)[:100]}")
-    # 移除损坏的图像
-    st.warning(f"⚠️ 移除损坏的图像: {info['filename']}")
     if current_idx < len(image_list):
         image_list.pop(current_idx)
-    # 更新索引
     if current_idx >= len(image_list) and len(image_list) > 0:
         st.session_state.selected_image_idx = len(image_list) - 1
     elif len(image_list) == 0:
@@ -379,7 +364,6 @@ col1, col2 = st.columns([3, 4], gap="large")
 with col1:
     st.subheader(T["preview"])
     if img:
-        # 优化图像显示，限制最大高度
         max_height = 600
         if img.height > max_height:
             scale = max_height / img.height
@@ -392,7 +376,6 @@ with col1:
 
 with col2:
     st.subheader(T["score_title"])
-    # 评分表单
     with st.form("rating_form", clear_on_submit=False):
         items = [
             {"key": "sharpness", "name": T['sharpness'][0], "desc": T['sharpness'][1]},
@@ -402,17 +385,16 @@ with col2:
         ]
         
         ratings = {}
-        # 检查是否已有评分，加载历史评分
         uid = f"{info['filename']}_{info['method']}"
         initial_values = {item['key']: 3 for item in items}
         
-        if uid in rated_set and 'df_rated' in locals():
+        if uid in rated_set and not df_rated.empty:
             try:
                 rated_row = df_rated[(df_rated["filename"] == info["filename"]) & 
                                    (df_rated["method"] == info["method"])].iloc[0]
                 for item in items:
                     if item['key'] in rated_row and pd.notna(rated_row[item['key']]):
-                        initial_values[item['key']] = int(rated_row[item['key']])  # 确保是整数
+                        initial_values[item['key']] = int(rated_row[item['key']])
             except Exception as e:
                 st.warning(f"⚠️ 加载历史评分失败: {str(e)}")
         
@@ -420,7 +402,6 @@ with col2:
         for item in items:
             st.markdown(f"**{item['name']}**")
             key = f"rating_{item['key']}_{current_idx}"
-            # 确保初始值是整数且在1-5范围内
             init_val = max(1, min(5, int(initial_values[item['key']])))
             ratings[item['key']] = st.slider(
                 item['key'],
@@ -440,46 +421,53 @@ with col2:
         with col_save_next:
             submit_save_next = st.form_submit_button(T["save_next"])
         
-        # 处理表单提交
+        # 处理表单提交 - 关键修复2：优化更新逻辑
         if submit_save or submit_save_next:
-            # 构建评分数据
-            row = {
+            # 构建评分数据（严格按照COLUMNS顺序）
+            row_data = {
                 "name": st.session_state.user_name,
                 "institution": st.session_state.user_institution,
                 "years_of_experience": user_years,
                 "modality": info["modality"],
                 "method": info["method"],
                 "filename": info["filename"],
-                "rating_time": datetime.now().strftime("%Y-%m-%d %H:%M:%S"),
-                **ratings
+                "sharpness": ratings["sharpness"],
+                "artifact": ratings["artifact"],
+                "naturalness": ratings["naturalness"],
+                "diagnostic_confidence": ratings["diagnostic_confidence"],
+                "rating_time": datetime.now().strftime("%Y-%m-%d %H:%M:%S")
             }
             
-            # 读取现有数据
+            # 读取现有数据并去重
             try:
                 df = pd.read_csv(SAVE_FILE, encoding="utf-8-sig")
+                # 再次去重，确保没有重复记录
+                df = df.drop_duplicates(subset=["filename", "method"], keep="last").reset_index(drop=True)
             except:
                 df = pd.DataFrame(columns=COLUMNS)
             
             # 检查是否已存在该图像的评分
-            uid = f"{info['filename']}_{info['method']}"
             existing_mask = (df["filename"] == info["filename"]) & (df["method"] == info["method"])
             
-            if existing_mask.any():
-                # 更新现有评分
-                df.loc[existing_mask, :] = pd.Series(row)
-            else:
-                # 添加新评分
-                df = pd.concat([df, pd.DataFrame([row])], ignore_index=True)
-            
-            # 保存数据
             try:
-                df.to_csv(SAVE_FILE, index=False, encoding="utf-8-sig")
-                st.toast(T["saved"], icon="✅")
+                if existing_mask.any():
+                    # 关键修复3：不使用整体赋值，而是逐列更新（避免索引不匹配）
+                    idx = df[existing_mask].index[0]  # 获取唯一匹配的索引
+                    for col in COLUMNS:
+                        df.at[idx, col] = row_data[col]
+                else:
+                    # 添加新行（确保列顺序一致）
+                    new_row = pd.DataFrame([row_data], columns=COLUMNS)
+                    df = pd.concat([df, new_row], ignore_index=True)
                 
-                # 更新已评分集合
+                # 保存前再次去重（双重保险）
+                df = df.drop_duplicates(subset=["filename", "method"], keep="last").reset_index(drop=True)
+                df.to_csv(SAVE_FILE, index=False, encoding="utf-8-sig")
+                
+                st.toast(T["saved"], icon="✅")
                 rated_set.add(uid)
                 
-                # 如果是保存并下一张，且不是最后一张
+                # 保存并下一张
                 if submit_save_next and current_idx < len(image_list) - 1:
                     st.session_state.selected_image_idx += 1
                     st.rerun()
@@ -492,8 +480,8 @@ st.subheader(T["download_title"])
 
 try:
     df_download = pd.read_csv(SAVE_FILE, encoding="utf-8-sig")
+    df_download = df_download.drop_duplicates(subset=["filename", "method"], keep="last").reset_index(drop=True)
     if not df_download.empty:
-        # 显示数据预览（可选显示method列）
         show_method = st.checkbox("显示方法列 / Show Method Column", value=False)
         display_cols = df_download.columns.tolist()
         if not show_method and "method" in display_cols:
@@ -501,7 +489,6 @@ try:
         
         st.dataframe(df_download[display_cols], use_container_width=True, height=300)
         
-        # 下载按钮
         with open(SAVE_FILE, "rb") as f:
             st.download_button(
                 label=T["download"],
@@ -511,7 +498,6 @@ try:
                 use_container_width=True
             )
         
-        # 显示统计信息
         st.markdown(f"### 📈 统计信息 / Statistics")
         col_stats1, col_stats2, col_stats3 = st.columns(3)
         with col_stats1:
