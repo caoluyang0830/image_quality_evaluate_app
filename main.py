@@ -50,11 +50,15 @@ TEXT = {
         "preview": "图像预览",
         "score_title": "📊 评分指标",
         "save_next": "💾 保存并下一张",
+        "undo_last": "↩️ 撤销上一次评分",
+        "undo_confirm": "确认撤销上一次评分？撤销后将回到该图片重新评分",
+        "undo_success": "✅ 已撤销上一次评分",
         "saved": "✅ 已保存",
         "finished": "🎉 您的评分已全部完成！",
         "download_title": "📥 我的评分数据",
         "download": "📤 下载 CSV",
         "no_data": "暂无评分数据",
+        "no_undo": "⚠️ 没有可撤销的评分",
         "mos": "MOS 1-5 分",
         "sharpness": ("清晰度", "1=差，5=好"),
         "artifact": ("伪影", "1=多，5=少"),
@@ -78,11 +82,15 @@ TEXT = {
         "preview": "Image Preview",
         "score_title": "📊 Scoring Metrics",
         "save_next": "💾 Save & Next",
+        "undo_last": "↩️ Undo Last Rating",
+        "undo_confirm": "Confirm to undo last rating? You will return to that image to re-rate",
+        "undo_success": "✅ Last rating undone",
         "saved": "✅ Saved",
         "finished": "🎉 All images have been rated!",
         "download_title": "📥 My Rating Data",
         "download": "📤 Download CSV",
         "no_data": "No rating data yet",
+        "no_undo": "⚠️ No ratings to undo",
         "mos": "MOS 1–5",
         "sharpness": ("Sharpness", "1=Bad, 5=Good"),
         "artifact": ("Artifacts", "1=Many, 5=Few"),
@@ -139,6 +147,9 @@ if "user_institution" not in st.session_state:
     st.session_state.user_institution = ""
 if "user_years" not in st.session_state:
     st.session_state.user_years = ""
+# 新增：记录上一次评分的信息，用于悔棋
+if "last_rated_info" not in st.session_state:
+    st.session_state.last_rated_info = None  # 存储上一次评分的 (filename, method, idx)
 
 # ========= 用户信息输入 =========
 st.markdown(f"### {T['rater_info']}")
@@ -176,7 +187,6 @@ with col_years:
         key="input_years",
         help=T["years_help"],
     )
-
 
 # ========= 从业年限校验 =========
 user_years = 0.0
@@ -265,13 +275,54 @@ if SAVE_FILE and os.path.exists(SAVE_FILE):
     df_rated = pd.read_csv(SAVE_FILE, encoding="utf-8").fillna("")
     if not df_rated.empty:
         rated_set = set(df_rated["filename"] + "_" + df_rated["method"])
+        # 如果有已评分数据，更新last_rated_info为最后一条记录
+        if not df_rated.empty:
+            last_row = df_rated.iloc[-1]
+            last_key = f"{last_row['filename']}_{last_row['method']}"
+            # 找到该记录在image_list中的索引
+            for i, info in enumerate(image_list):
+                if f"{info['filename']}_{info['method']}" == last_key:
+                    st.session_state.last_rated_info = (last_row['filename'], last_row['method'], i)
+                    break
 
+# 初始时跳过已评分的图片
 while st.session_state.idx < len(image_list):
     info = image_list[st.session_state.idx]
     if f"{info['filename']}_{info['method']}" in rated_set:
         st.session_state.idx += 1
     else:
         break
+
+# ========= 悔棋功能实现 =========
+def undo_last_rating():
+    """撤销上一次评分"""
+    if not SAVE_FILE or not os.path.exists(SAVE_FILE):
+        st.warning(T["no_undo"])
+        return False
+    
+    df = pd.read_csv(SAVE_FILE, encoding="utf-8")
+    if df.empty:
+        st.warning(T["no_undo"])
+        return False
+    
+    # 删除最后一行评分
+    df = df.iloc[:-1].reset_index(drop=True)
+    df.to_csv(SAVE_FILE, index=False, encoding="utf-8")
+    
+    # 更新rated_set
+    global rated_set
+    if st.session_state.last_rated_info:
+        last_filename, last_method, last_idx = st.session_state.last_rated_info
+        rated_key = f"{last_filename}_{last_method}"
+        if rated_key in rated_set:
+            rated_set.remove(rated_key)
+    
+    # 更新索引，回到上一张图片
+    st.session_state.idx = st.session_state.last_rated_info[2] if st.session_state.last_rated_info else max(0, st.session_state.idx - 1)
+    st.session_state.last_rated_info = None  # 重置last_rated_info
+    
+    st.toast(T["undo_success"], icon="✅")
+    return True
 
 # ========= 主界面 =========
 st.markdown(
@@ -293,6 +344,14 @@ st.progress(progress, text=f"{T['progress']}：{completed}/{total}（{progress:.
 if st.session_state.idx >= len(image_list):
     st.success(T["finished"])
     st.balloons()
+    
+    # 在完成页面也显示悔棋按钮
+    col_undo, col_spacer = st.columns([1, 3])
+    with col_undo:
+        if st.button(T["undo_last"], type="secondary", use_container_width=True):
+            if st.checkbox(T["undo_confirm"], key="undo_confirm_finish"):
+                if undo_last_rating():
+                    st.rerun()
 else:
     info = image_list[st.session_state.idx]
     try:
@@ -327,22 +386,35 @@ else:
             st.caption(desc)
             st.markdown("---")
 
-        if st.button(T["save_next"], type="primary", use_container_width=True):
-            row = {
-                "name": user_name,
-                "institution": user_institution,
-                "years_of_experience": user_years,
-                "modality": info["modality"],
-                "method": info["method"],
-                "filename": info["filename"],
-                **ratings,
-            }
-            pd.DataFrame([row]).to_csv(
-                SAVE_FILE, mode="a", header=False, index=False, encoding="utf-8"
-            )
-            st.session_state.idx += 1
-            st.toast(T["saved"], icon="✅")
-            st.rerun()
+        # 保存并下一张 + 悔棋按钮
+        col_save, col_undo = st.columns(2, gap="medium")
+        with col_save:
+            if st.button(T["save_next"], type="primary", use_container_width=True):
+                row = {
+                    "name": user_name,
+                    "institution": user_institution,
+                    "years_of_experience": user_years,
+                    "modality": info["modality"],
+                    "method": info["method"],
+                    "filename": info["filename"],
+                    **ratings,
+                }
+                pd.DataFrame([row]).to_csv(
+                    SAVE_FILE, mode="a", header=False, index=False, encoding="utf-8"
+                )
+                # 记录上一次评分的信息
+                st.session_state.last_rated_info = (info["filename"], info["method"], st.session_state.idx)
+                st.session_state.idx += 1
+                st.toast(T["saved"], icon="✅")
+                st.rerun()
+        
+        with col_undo:
+            # 只有有可撤销的评分时才启用按钮
+            disabled = not st.session_state.last_rated_info and completed == 0
+            if st.button(T["undo_last"], type="secondary", use_container_width=True, disabled=disabled):
+                if st.checkbox(T["undo_confirm"], key=f"undo_confirm_{st.session_state.idx}"):
+                    if undo_last_rating():
+                        st.rerun()
 
 # ========= 数据下载 =========
 st.markdown("---")
