@@ -145,8 +145,9 @@ st.markdown(f"### {T['rater_info']}")
 col_name, col_inst, col_years = st.columns(3, gap="medium")
 
 with col_name:
+    st.markdown(f"**{T['name']}**")  # 小标题
     user_name = st.text_input(
-        T["name"],
+        "",
         value=st.session_state.user_name,
         placeholder=T["name"],
         label_visibility="collapsed",
@@ -155,8 +156,9 @@ with col_name:
     st.session_state.user_name = user_name
 
 with col_inst:
+    st.markdown(f"**{T['institution']}**")  # 小标题
     user_institution = st.text_input(
-        T["institution"],
+        "",
         value=st.session_state.user_institution,
         placeholder=T["institution"],
         label_visibility="collapsed",
@@ -165,14 +167,16 @@ with col_inst:
     st.session_state.user_institution = user_institution
 
 with col_years:
+    st.markdown(f"**{T['years']}**")  # 小标题
     user_years_input = st.text_input(
-        T["years"],
+        "",
         value=st.session_state.user_years,
         placeholder=T["years_placeholder"],
         label_visibility="collapsed",
         key="input_years",
         help=T["years_help"],
     )
+
 
 # ========= 从业年限校验 =========
 user_years = 0.0
