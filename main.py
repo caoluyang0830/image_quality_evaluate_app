@@ -5,8 +5,14 @@ import pandas as pd
 import warnings
 import re
 
-# ================= 基础设置 =================
 warnings.filterwarnings("ignore")
+
+# 页面配置
+st.set_page_config(
+    page_title="图像多指标主观评分系统",
+    layout="wide",
+    initial_sidebar_state="expanded",
+)
 
 st.markdown(
     """
@@ -20,15 +26,10 @@ st.markdown(
     unsafe_allow_html=True,
 )
 
-st.set_page_config(
-    page_title="图像多指标主观评分系统",
-    layout="wide",
-    initial_sidebar_state="expanded",
-)
-
 # ========= 语言选择 =========
 LANG = st.selectbox("🌐 Language / 语言", ["中文", "English"], index=0)
 
+# ========= 文本字典 =========
 TEXT = {
     "中文": {
         "title": "图像多指标主观评分系统",
@@ -110,17 +111,14 @@ st.markdown(f"### {T['rater_info']}")
 col_name, col_inst, col_years = st.columns(3, gap="medium")
 with col_name:
     st.caption(T['name'])
-    user_name = st.text_input("", value=st.session_state.user_name, placeholder=T["name"], label_visibility="collapsed")
-    st.session_state.user_name = user_name
+    st.session_state.user_name = st.text_input("", value=st.session_state.user_name, placeholder=T["name"], label_visibility="collapsed")
 with col_inst:
     st.caption(T['institution'])
-    user_institution = st.text_input("", value=st.session_state.user_institution, placeholder=T["institution"], label_visibility="collapsed")
-    st.session_state.user_institution = user_institution
+    st.session_state.user_institution = st.text_input("", value=st.session_state.user_institution, placeholder=T["institution"], label_visibility="collapsed")
 with col_years:
     st.caption(T['years'])
     user_years_input = st.text_input("", value=st.session_state.user_years, placeholder=T["years_placeholder"], label_visibility="collapsed", help=T["years_help"])
 
-# ========= 从业年限校验 =========
 user_years = 0.0
 if user_years_input.strip() and re.match(r'^-?\d+(\.\d+)?$', user_years_input):
     user_years = round(max(0.0, min(80.0, float(user_years_input))),1)
@@ -129,14 +127,13 @@ else:
         st.error(T["years_error"])
 st.session_state.user_years = str(user_years)
 
-# ========= 用户信息校验 =========
-if not user_name: st.warning(T["name_warn"]); st.stop()
-if not user_institution: st.warning(T["inst_warn"]); st.stop()
+if not st.session_state.user_name: st.warning(T["name_warn"]); st.stop()
+if not st.session_state.user_institution: st.warning(T["inst_warn"]); st.stop()
 if user_years <= 0.0: st.warning(T["years_warn"]); st.stop()
 
 # ========= 用户专属 CSV =========
 def sanitize_filename(name): return re.sub(r'[\\/:*?"<>|]', '_', name).strip()
-SAVE_FILE = os.path.normpath(f"{selected_modality}_{sanitize_filename(user_name)}_ratings.csv")
+SAVE_FILE = os.path.normpath(f"{selected_modality}_{sanitize_filename(st.session_state.user_name)}_ratings.csv")
 COLUMNS = ["name","institution","years_of_experience","modality","method","filename","sharpness","artifact","naturalness","diagnostic_confidence"]
 if not os.path.exists(SAVE_FILE): pd.DataFrame(columns=COLUMNS).to_csv(SAVE_FILE, index=False, encoding="utf-8")
 
@@ -164,21 +161,22 @@ else:
 # ========= 左侧图像列表 =========
 st.sidebar.subheader(T["image_list"])
 labels = []
-for idx, img_info in enumerate(image_list):
+for idx,img_info in enumerate(image_list):
     uid = f"{img_info['filename']}_{img_info['method']}"
     label = f"图像{idx+1}" if LANG=="中文" else f"Image {idx+1}"
     if uid in rated_set: label += " ✅"
     labels.append(label)
 
-# radio 直接用 session_state key
+# 确保 session_state 合法
+if not isinstance(st.session_state.selected_image_idx,int) or st.session_state.selected_image_idx>=len(labels):
+    st.session_state.selected_image_idx=0
+
 selected_label = st.sidebar.radio(
     T["select_image"],
     labels,
     index=st.session_state.selected_image_idx,
-    key="selected_image_idx"  # 直接用 session_state key
+    key="selected_image_idx"
 )
-
-# 读取选择的图像
 info = image_list[st.session_state.selected_image_idx]
 
 # ========= 主界面 =========
@@ -217,8 +215,13 @@ with col2:
         submitted = st.form_submit_button(T["save_next"])
         if submitted:
             row = {
-                "name":user_name,"institution":user_institution,"years_of_experience":user_years,
-                "modality":info["modality"],"method":info["method"],"filename":info["filename"],**ratings
+                "name":st.session_state.user_name,
+                "institution":st.session_state.user_institution,
+                "years_of_experience":user_years,
+                "modality":info["modality"],
+                "method":info["method"],
+                "filename":info["filename"],
+                **ratings
             }
             if os.path.exists(SAVE_FILE): df=pd.read_csv(SAVE_FILE, encoding="utf-8")
             else: df=pd.DataFrame(columns=COLUMNS)
@@ -228,8 +231,8 @@ with col2:
             if uid in existing_uids:
                 idx=df.index[df["filename"]+"_"+df["method"]==uid][0]
                 for col in ratings: df.at[idx,col]=ratings[col]
-                df.at[idx,"name"]=user_name
-                df.at[idx,"institution"]=user_institution
+                df.at[idx,"name"]=st.session_state.user_name
+                df.at[idx,"institution"]=st.session_state.user_institution
                 df.at[idx,"years_of_experience"]=user_years
             else:
                 df=pd.concat([df,pd.DataFrame([row])],ignore_index=True)
