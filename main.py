@@ -8,7 +8,6 @@ import re
 # ================= 基础设置 =================
 warnings.filterwarnings("ignore")
 
-# ========= 隐藏 Streamlit 默认 UI =========
 st.markdown(
     """
     <style>
@@ -21,7 +20,6 @@ st.markdown(
     unsafe_allow_html=True,
 )
 
-# ========= 页面配置 =========
 st.set_page_config(
     page_title="图像多指标主观评分系统",
     layout="wide",
@@ -31,7 +29,6 @@ st.set_page_config(
 # ========= 语言选择 =========
 LANG = st.selectbox("🌐 Language / 语言", ["中文", "English"], index=0)
 
-# ========= 多语言文本 =========
 TEXT = {
     "中文": {
         "title": "图像多指标主观评分系统",
@@ -233,12 +230,8 @@ with col2:
     metrics = ["sharpness", "artifact", "naturalness", "diagnostic_confidence"]
     ratings = {}
     for metric in metrics:
-        # 每张图像独立 key
         key = f"{metric}_{st.session_state.selected_image_idx}"
-        default_val = st.session_state.get(key, 3)
-        ratings[metric] = st.slider(metric, 1, 5, value=default_val, key=key)
-        # 自动保存到 session_state
-        st.session_state[key] = ratings[metric]
+        ratings[metric] = st.slider(metric, 1, 5, value=st.session_state.get(key, 3), key=key)
 
     if st.button(T["save_next"], type="primary", use_container_width=True):
         row = {
@@ -247,7 +240,6 @@ with col2:
         }
         pd.DataFrame([row]).to_csv(SAVE_FILE, mode="a", header=False, index=False, encoding="utf-8")
         st.toast(T["saved"], icon="✅")
-        # 跳到下一张图像
         st.session_state.selected_image_idx = min(st.session_state.selected_image_idx + 1, len(image_list)-1)
         st.rerun()
 
