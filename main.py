@@ -24,7 +24,7 @@ st.markdown(
 # ========= 页面配置 =========
 st.set_page_config(
     page_title="图像多指标主观评分系统",
-    layout="centered",
+    layout="wide",  # 改为宽布局以适应更多内容
     initial_sidebar_state="collapsed",
 )
 
@@ -50,20 +50,26 @@ TEXT = {
         "preview": "图像预览",
         "score_title": "📊 评分指标",
         "save_next": "💾 保存并下一张",
-        "undo_last": "↩️ 撤销上一次评分",
-        "undo_confirm": "确认撤销上一次评分？撤销后将回到该图片重新评分",
-        "undo_success": "✅ 已撤销上一次评分",
+        "save_update": "💾 保存修改",
         "saved": "✅ 已保存",
+        "updated": "✅ 已更新",
         "finished": "🎉 您的评分已全部完成！",
         "download_title": "📥 我的评分数据",
         "download": "📤 下载 CSV",
         "no_data": "暂无评分数据",
-        "no_undo": "⚠️ 没有可撤销的评分",
         "mos": "MOS 1-5 分",
         "sharpness": ("清晰度", "1=差，5=好"),
         "artifact": ("伪影", "1=多，5=少"),
         "naturalness": ("真实感", "1=不符合，5=符合"),
         "diagnostic": ("可诊断性", "1=不足，5=足够"),
+        "new_rating": "📝 新图像评分",
+        "re_rating": "🔄 重新评分",
+        "select_rerate_image": "选择要重新评分的图像",
+        "no_rated_images": "暂无已评分的图像",
+        "image_info": "图像信息",
+        "current_score": "当前评分",
+        "rerate_success": "✅ 重新评分成功！",
+        "back_to_new": "← 返回新图像评分"
     },
     "English": {
         "title": "Multi-Metric Image Subjective Scoring System",
@@ -82,20 +88,26 @@ TEXT = {
         "preview": "Image Preview",
         "score_title": "📊 Scoring Metrics",
         "save_next": "💾 Save & Next",
-        "undo_last": "↩️ Undo Last Rating",
-        "undo_confirm": "Confirm to undo last rating? You will return to that image to re-rate",
-        "undo_success": "✅ Last rating undone",
+        "save_update": "💾 Save Update",
         "saved": "✅ Saved",
+        "updated": "✅ Updated",
         "finished": "🎉 All images have been rated!",
         "download_title": "📥 My Rating Data",
         "download": "📤 Download CSV",
         "no_data": "No rating data yet",
-        "no_undo": "⚠️ No ratings to undo",
         "mos": "MOS 1–5",
         "sharpness": ("Sharpness", "1=Bad, 5=Good"),
         "artifact": ("Artifacts", "1=Many, 5=Few"),
         "naturalness": ("Naturalness", "1=Unrealistic, 5=Realistic"),
         "diagnostic": ("Diagnostic Confidence", "1=Low, 5=High"),
+        "new_rating": "📝 New Image Rating",
+        "re_rating": "🔄 Re-Rating",
+        "select_rerate_image": "Select image to re-rate",
+        "no_rated_images": "No rated images yet",
+        "image_info": "Image Information",
+        "current_score": "Current Score",
+        "rerate_success": "✅ Re-rating successful!",
+        "back_to_new": "← Back to New Rating"
     },
 }
 
@@ -147,9 +159,10 @@ if "user_institution" not in st.session_state:
     st.session_state.user_institution = ""
 if "user_years" not in st.session_state:
     st.session_state.user_years = ""
-# 新增：记录上一次评分的信息，用于悔棋
-if "last_rated_info" not in st.session_state:
-    st.session_state.last_rated_info = None  # 存储上一次评分的 (filename, method, idx)
+if "active_tab" not in st.session_state:
+    st.session_state.active_tab = "new"  # new 或 re_rate
+if "selected_rerate_idx" not in st.session_state:
+    st.session_state.selected_rerate_idx = None
 
 # ========= 用户信息输入 =========
 st.markdown(f"### {T['rater_info']}")
@@ -262,6 +275,7 @@ for method in sorted(os.listdir(modality_path)):
                     "method": method,
                     "filename": f,
                     "filepath": os.path.normpath(os.path.join(method_path, f)),
+                    "unique_key": f"{method}_{f}"  # 用于唯一标识图像
                 }
             )
 
@@ -269,60 +283,42 @@ if not image_list:
     st.error(f"❌ 模态 {selected_modality} 下未找到图片！")
     st.stop()
 
-# ========= 跳过已评分 =========
+# ========= 加载已评分数据 =========
+rated_data = []
 rated_set = set()
 if SAVE_FILE and os.path.exists(SAVE_FILE):
     df_rated = pd.read_csv(SAVE_FILE, encoding="utf-8").fillna("")
     if not df_rated.empty:
+        # 创建已评分集合
         rated_set = set(df_rated["filename"] + "_" + df_rated["method"])
-        # 如果有已评分数据，更新last_rated_info为最后一条记录
-        if not df_rated.empty:
-            last_row = df_rated.iloc[-1]
-            last_key = f"{last_row['filename']}_{last_row['method']}"
-            # 找到该记录在image_list中的索引
-            for i, info in enumerate(image_list):
-                if f"{info['filename']}_{info['method']}" == last_key:
-                    st.session_state.last_rated_info = (last_row['filename'], last_row['method'], i)
+        
+        # 构建已评分数据列表（包含索引信息）
+        for idx, row in df_rated.iterrows():
+            # 找到对应的图像信息
+            for img_info in image_list:
+                if img_info["filename"] == row["filename"] and img_info["method"] == row["method"]:
+                    rated_data.append({
+                        "csv_index": idx,  # CSV中的行索引
+                        "image_index": image_list.index(img_info),  # 图像列表中的索引
+                        "method": row["method"],
+                        "filename": row["filename"],
+                        "filepath": img_info["filepath"],
+                        "sharpness": row["sharpness"],
+                        "artifact": row["artifact"],
+                        "naturalness": row["naturalness"],
+                        "diagnostic_confidence": row["diagnostic_confidence"],
+                        "display_text": f"{row['method']} - {row['filename']}"
+                    })
                     break
 
-# 初始时跳过已评分的图片
-while st.session_state.idx < len(image_list):
-    info = image_list[st.session_state.idx]
-    if f"{info['filename']}_{info['method']}" in rated_set:
-        st.session_state.idx += 1
-    else:
-        break
-
-# ========= 悔棋功能实现 =========
-def undo_last_rating():
-    """撤销上一次评分"""
-    if not SAVE_FILE or not os.path.exists(SAVE_FILE):
-        st.warning(T["no_undo"])
-        return False
-    
-    df = pd.read_csv(SAVE_FILE, encoding="utf-8")
-    if df.empty:
-        st.warning(T["no_undo"])
-        return False
-    
-    # 删除最后一行评分
-    df = df.iloc[:-1].reset_index(drop=True)
-    df.to_csv(SAVE_FILE, index=False, encoding="utf-8")
-    
-    # 更新rated_set
-    global rated_set
-    if st.session_state.last_rated_info:
-        last_filename, last_method, last_idx = st.session_state.last_rated_info
-        rated_key = f"{last_filename}_{last_method}"
-        if rated_key in rated_set:
-            rated_set.remove(rated_key)
-    
-    # 更新索引，回到上一张图片
-    st.session_state.idx = st.session_state.last_rated_info[2] if st.session_state.last_rated_info else max(0, st.session_state.idx - 1)
-    st.session_state.last_rated_info = None  # 重置last_rated_info
-    
-    st.toast(T["undo_success"], icon="✅")
-    return True
+# ========= 跳过已评分（仅新图像评分时） =========
+if st.session_state.active_tab == "new":
+    while st.session_state.idx < len(image_list):
+        info = image_list[st.session_state.idx]
+        if f"{info['filename']}_{info['method']}" in rated_set:
+            st.session_state.idx += 1
+        else:
+            break
 
 # ========= 主界面 =========
 st.markdown(
@@ -335,60 +331,58 @@ st.markdown(
     unsafe_allow_html=True,
 )
 
+# ========= 选项卡切换 =========
+tab1, tab2 = st.tabs([T["new_rating"], T["re_rating"]])
+
+# ========= 计算进度 =========
 total = len(image_list)
 completed = len(rated_set)
 progress = completed / total if total > 0 else 0
-st.progress(progress, text=f"{T['progress']}：{completed}/{total}（{progress:.1%}）")
 
-# ========= 评分流程 =========
-if st.session_state.idx >= len(image_list):
-    st.success(T["finished"])
-    st.balloons()
+with tab1:
+    # 新图像评分选项卡
+    st.progress(progress, text=f"{T['progress']}：{completed}/{total}（{progress:.1%}）")
     
-    # 在完成页面也显示悔棋按钮
-    col_undo, col_spacer = st.columns([1, 3])
-    with col_undo:
-        if st.button(T["undo_last"], type="secondary", use_container_width=True):
-            if st.checkbox(T["undo_confirm"], key="undo_confirm_finish"):
-                if undo_last_rating():
-                    st.rerun()
-else:
-    info = image_list[st.session_state.idx]
-    try:
-        img = Image.open(info["filepath"])
-        if img.mode == "RGBA":
-            img = img.convert("RGB")
-    except Exception as e:
-        st.error(f"❌ 图片加载失败：{info['filename']} | {e}")
-        st.session_state.idx += 1
-        st.rerun()
+    if st.session_state.idx >= len(image_list):
+        st.success(T["finished"])
+        st.balloons()
+    else:
+        info = image_list[st.session_state.idx]
+        try:
+            img = Image.open(info["filepath"])
+            if img.mode == "RGBA":
+                img = img.convert("RGB")
+        except Exception as e:
+            st.error(f"❌ 图片加载失败：{info['filename']} | {e}")
+            st.session_state.idx += 1
+            st.rerun()
 
-    col1, col2 = st.columns([3, 4], gap="large")
-    with col1:
-        st.subheader(T["preview"])
-        st.image(img, caption=info["filename"], use_container_width=True)
-        st.caption(f"{st.session_state.idx + 1}/{total}")
+        col1, col2 = st.columns([3, 4], gap="large")
+        with col1:
+            st.subheader(T["preview"])
+            st.image(img, caption=f"{info['method']} - {info['filename']}", use_container_width=True)
+            st.caption(f"{st.session_state.idx + 1}/{total}")
+            st.markdown(f"**{T['image_info']}**")
+            st.write(f"📁 方法：{info['method']}")
+            st.write(f"🗂️ 文件名：{info['filename']}")
 
-    with col2:
-        st.subheader(T["score_title"])
-        items = [
-            ("sharpness", *T["sharpness"]),
-            ("artifact", *T["artifact"]),
-            ("naturalness", *T["naturalness"]),
-            ("diagnostic_confidence", *T["diagnostic"]),
-        ]
-        ratings = {}
-        for k, name, desc in items:
-            st.markdown(f"**{name}**")
-            ratings[k] = st.slider(
-                " ", 1, 5, 3, key=f"{k}_{st.session_state.idx}", label_visibility="collapsed"
-            )
-            st.caption(desc)
-            st.markdown("---")
+        with col2:
+            st.subheader(T["score_title"])
+            items = [
+                ("sharpness", *T["sharpness"]),
+                ("artifact", *T["artifact"]),
+                ("naturalness", *T["naturalness"]),
+                ("diagnostic_confidence", *T["diagnostic"]),
+            ]
+            ratings = {}
+            for k, name, desc in items:
+                st.markdown(f"**{name}**")
+                ratings[k] = st.slider(
+                    " ", 1, 5, 3, key=f"{k}_new_{st.session_state.idx}", label_visibility="collapsed"
+                )
+                st.caption(desc)
+                st.markdown("---")
 
-        # 保存并下一张 + 悔棋按钮
-        col_save, col_undo = st.columns(2, gap="medium")
-        with col_save:
             if st.button(T["save_next"], type="primary", use_container_width=True):
                 row = {
                     "name": user_name,
@@ -402,18 +396,92 @@ else:
                 pd.DataFrame([row]).to_csv(
                     SAVE_FILE, mode="a", header=False, index=False, encoding="utf-8"
                 )
-                # 记录上一次评分的信息
-                st.session_state.last_rated_info = (info["filename"], info["method"], st.session_state.idx)
                 st.session_state.idx += 1
                 st.toast(T["saved"], icon="✅")
                 st.rerun()
+
+with tab2:
+    # 重新评分选项卡
+    st.markdown(f"### {T['select_rerate_image']}")
+    
+    if not rated_data:
+        st.info(T["no_rated_images"])
+    else:
+        # 选择要重新评分的图像
+        image_options = [item["display_text"] for item in rated_data]
+        selected_image_text = st.selectbox(
+            T["select_rerate_image"],
+            image_options,
+            index=st.session_state.selected_rerate_idx if st.session_state.selected_rerate_idx is not None else 0,
+            key="rerate_select"
+        )
         
-        with col_undo:
-            # 只有有可撤销的评分时才启用按钮
-            disabled = not st.session_state.last_rated_info and completed == 0
-            if st.button(T["undo_last"], type="secondary", use_container_width=True, disabled=disabled):
-                if st.checkbox(T["undo_confirm"], key=f"undo_confirm_{st.session_state.idx}"):
-                    if undo_last_rating():
+        # 找到选中的图像数据
+        selected_data = None
+        for idx, item in enumerate(rated_data):
+            if item["display_text"] == selected_image_text:
+                selected_data = item
+                st.session_state.selected_rerate_idx = idx
+                break
+        
+        if selected_data:
+            try:
+                img = Image.open(selected_data["filepath"])
+                if img.mode == "RGBA":
+                    img = img.convert("RGB")
+            except Exception as e:
+                st.error(f"❌ 图片加载失败：{selected_data['filename']} | {e}")
+                st.stop()
+
+            col1, col2 = st.columns([3, 4], gap="large")
+            with col1:
+                st.subheader(T["preview"])
+                st.image(img, caption=selected_data["display_text"], use_container_width=True)
+                st.markdown(f"**{T['image_info']}**")
+                st.write(f"📁 方法：{selected_data['method']}")
+                st.write(f"🗂️ 文件名：{selected_data['filename']}")
+                st.write(f"📊 {T['current_score']}：")
+                st.write(f"   - {T['sharpness'][0]}: {selected_data['sharpness']}")
+                st.write(f"   - {T['artifact'][0]}: {selected_data['artifact']}")
+                st.write(f"   - {T['naturalness'][0]}: {selected_data['naturalness']}")
+                st.write(f"   - {T['diagnostic'][0]}: {selected_data['diagnostic_confidence']}")
+
+            with col2:
+                st.subheader(T["score_title"])
+                items = [
+                    ("sharpness", *T["sharpness"], selected_data["sharpness"]),
+                    ("artifact", *T["artifact"], selected_data["artifact"]),
+                    ("naturalness", *T["naturalness"], selected_data["naturalness"]),
+                    ("diagnostic_confidence", *T["diagnostic"], selected_data["diagnostic_confidence"]),
+                ]
+                new_ratings = {}
+                for k, name, desc, current_val in items:
+                    st.markdown(f"**{name}**")
+                    # 滑块默认值设为当前评分
+                    new_ratings[k] = st.slider(
+                        " ", 1, 5, int(current_val), 
+                        key=f"{k}_rerate_{selected_data['csv_index']}", 
+                        label_visibility="collapsed"
+                    )
+                    st.caption(f"{desc} | {T['current_score']}: {current_val}")
+                    st.markdown("---")
+
+                col_btn1, col_btn2 = st.columns(2, gap="medium")
+                with col_btn1:
+                    if st.button(T["save_update"], type="primary", use_container_width=True):
+                        # 读取CSV并更新对应行
+                        df = pd.read_csv(SAVE_FILE, encoding="utf-8")
+                        # 根据CSV索引更新评分
+                        df.loc[selected_data["csv_index"], new_ratings.keys()] = new_ratings.values()
+                        df.to_csv(SAVE_FILE, index=False, encoding="utf-8")
+                        st.toast(T["updated"], icon="✅")
+                        # 重新加载已评分数据
+                        st.rerun()
+                
+                with col_btn2:
+                    if st.button(T["back_to_new"], use_container_width=True):
+                        # 切换到新图像评分选项卡
+                        st.session_state.active_tab = "new"
                         st.rerun()
 
 # ========= 数据下载 =========
