@@ -5,28 +5,19 @@ import pandas as pd
 import warnings
 import re
 
-# ================= 基础设置 =================
 warnings.filterwarnings("ignore")
 
-# ========= 隐藏 Streamlit 默认 UI =========
-st.markdown(
-    """
-    <style>
-    #MainMenu {visibility: hidden;}
-    footer {visibility: hidden;}
-    .deploy-status {visibility: hidden;}
-    .stTextInput > div > div > input:focus { box-shadow: none; }
-    </style>
-    """,
-    unsafe_allow_html=True,
-)
+# ========= 隐藏默认 UI =========
+st.markdown("""
+<style>
+#MainMenu {visibility: hidden;}
+footer {visibility: hidden;}
+.deploy-status {visibility: hidden;}
+.stTextInput > div > div > input:focus { box-shadow: none; }
+</style>""", unsafe_allow_html=True)
 
 # ========= 页面配置 =========
-st.set_page_config(
-    page_title="图像多指标主观评分系统",
-    layout="centered",
-    initial_sidebar_state="collapsed",
-)
+st.set_page_config(page_title="图像多指标主观评分系统", layout="centered", initial_sidebar_state="collapsed")
 
 # ========= 语言选择 =========
 LANG = st.selectbox("🌐 Language / 语言", ["中文", "English"], index=0)
@@ -115,38 +106,30 @@ for key in ["idx", "user_name", "user_institution", "user_years"]:
 # ========= 用户信息输入 =========
 st.markdown(f"### {T['rater_info']}")
 col_name, col_inst, col_years = st.columns(3, gap="medium")
-
 with col_name:
     st.caption(T['name'])
     user_name = st.text_input("", value=st.session_state.user_name, placeholder=T["name"], key="input_name")
     st.session_state.user_name = user_name
-
 with col_inst:
     st.caption(T['institution'])
     user_institution = st.text_input("", value=st.session_state.user_institution, placeholder=T["institution"], key="input_institution")
     st.session_state.user_institution = user_institution
-
 with col_years:
     st.caption(T['years'])
     user_years_input = st.text_input("", value=st.session_state.user_years, placeholder=T["years_placeholder"], key="input_years", help=T["years_help"])
 
 # ========= 从业年限校验 =========
 user_years = 0.0
-if user_years_input.strip():
-    if re.match(r'^-?\d+(\.\d+)?$', user_years_input):
-        user_years = float(user_years_input)
-        user_years = max(0.0, min(80.0, user_years))
-        user_years = round(user_years, 1)
-    else:
-        st.error(T["years_error"])
+if user_years_input.strip() and re.match(r'^-?\d+(\.\d+)?$', user_years_input):
+    user_years = round(max(0.0,min(80.0,float(user_years_input))),1)
+else:
+    if user_years_input.strip(): st.error(T["years_error"])
 st.session_state.user_years = str(user_years)
 
 # ========= CSV 文件 =========
 def sanitize_filename(name: str) -> str:
     return re.sub(r'[\\/:*?"<>|]', '_', name).strip()
-
 SAVE_FILE = os.path.normpath(f"{selected_modality}_{sanitize_filename(user_name)}_ratings.csv") if user_name else ""
-
 COLUMNS = ["name","institution","years_of_experience","modality","method","filename","sharpness","artifact","naturalness","diagnostic_confidence"]
 if SAVE_FILE and not os.path.exists(SAVE_FILE):
     pd.DataFrame(columns=COLUMNS).to_csv(SAVE_FILE,index=False,encoding="utf-8")
@@ -168,7 +151,7 @@ for method in sorted(os.listdir(modality_path)):
 
 if not image_list: st.error(f"❌ 模态 {selected_modality} 下未找到图片！"); st.stop()
 
-# ========= 显示主界面 =========
+# ========= 主界面 =========
 st.markdown(f"<h2>🧑‍⚕️ {selected_modality} {T['title']}</h2><p style='color:#666;'>{user_name}（{user_institution} | {user_years} yrs） | {T['mos']}</p>",unsafe_allow_html=True)
 completed = 0
 if os.path.exists(SAVE_FILE): completed = len(pd.read_csv(SAVE_FILE))
@@ -182,10 +165,11 @@ def save_rating(info, ratings):
     df_exist = df_exist[~((df_exist["filename"]==info["filename"]) & (df_exist["method"]==info["method"]))]
     df_exist = pd.concat([df_exist,pd.DataFrame([row])], ignore_index=True)
     df_exist.to_csv(SAVE_FILE,index=False,encoding="utf-8")
-    # 保存到 SessionState
-    for k,v in ratings.items(): st.session_state[f"{k}_{st.session_state.idx}"]=v
+    # 更新 Slider 状态，key 与文件名绑定
+    for k,v in ratings.items():
+        st.session_state[f"{k}_{info['filename']}_{info['method']}"] = v
 
-# ========= 渲染图片评分界面 =========
+# ========= 渲染评分界面 =========
 def render_image(idx):
     info = image_list[idx]
     try:
@@ -207,7 +191,7 @@ def render_image(idx):
         exist_row = df_exist[(df_exist["filename"]==info["filename"]) & (df_exist["method"]==info["method"])]
         ratings={}
         for k,name,desc in items:
-            key=f"{k}_{idx}"
+            key=f"{k}_{info['filename']}_{info['method']}"  # 改成文件名+方法唯一
             if key in st.session_state: default_val=st.session_state[key]
             elif not exist_row.empty: default_val=int(exist_row[k].values[0])
             else: default_val=3
@@ -225,7 +209,7 @@ def render_image(idx):
         with btn2:
             if st.button(T["save_next"],type="primary", use_container_width=True):
                 save_rating(info,ratings)
-                if st.session_state.idx<len(image_list)-1:
+                if st.session_state.idx < len(image_list)-1:
                     st.session_state.idx+=1
                     st.toast(T["saved"],icon="✅")
                     st.rerun()
