@@ -53,10 +53,10 @@ TEXT = {
         "download": "📤 下载 CSV",
         "no_data": "暂无评分数据",
         "mos": "MOS 1-5 分",
-        "sharpness": ("视觉清晰度 / Sharpness", "结构边缘是否清晰，细节保留情况（1=差，5=好）"),
-        "artifact": ("伪影 / Artifact", "条纹、噪声、重影等伪影多少（1=多，5=少）"),
-        "naturalness": ("真实感 / Naturalness", "是否符合临床经验（1=不符合，5=非常符合）"),
-        "diagnostic": ("可诊断性 / Diagnostic confidence", "是否支持临床判断（1=不足，5=足够）"),
+        "sharpness": ("清晰度", "1=差，5=好"),
+        "artifact": ("伪影", "1=多，5=少"),
+        "naturalness": ("真实感", "1=不符合，5=符合"),
+        "diagnostic": ("可诊断性", "1=不足，5=足够"),
     },
     "English": {
         "title": "Multi-Metric Image Subjective Scoring System",
@@ -81,10 +81,10 @@ TEXT = {
         "download": "📤 Download CSV",
         "no_data": "No rating data yet",
         "mos": "MOS 1–5",
-        "sharpness": ("Sharpness / 视觉清晰度", "Are structure edges clear and details preserved? (1=Bad, 5=Good)"),
-        "artifact": ("Artifact / 伪影", "How many stripes, noise, ghosting artifacts? (1=Many, 5=Few)"),
-        "naturalness": ("Naturalness / 真实感", "Does it match clinical experience? (1=Unrealistic, 5=Very realistic)"),
-        "diagnostic": ("Diagnostic confidence / 可诊断性", "Is it sufficient for clinical judgment? (1=Low, 5=High)"),
+        "sharpness": ("Sharpness", "1=Bad, 5=Good"),
+        "artifact": ("Artifacts", "1=Many, 5=Few"),
+        "naturalness": ("Naturalness", "1=Unrealistic, 5=Realistic"),
+        "diagnostic": ("Diagnostic Confidence", "1=Low, 5=High"),
     },
 }
 
@@ -158,7 +158,7 @@ if user_years <= 0.0:
     st.warning(T["years_warn"])
     st.stop()
 
-# ========= 用户专属 CSV =========
+# ========= 生成用户专属 CSV =========
 def sanitize_filename(name: str) -> str:
     return re.sub(r'[\\/:*?"<>|]', '_', name).strip()
 SAVE_FILE = os.path.normpath(f"{selected_modality}_{sanitize_filename(user_name)}_ratings.csv")
@@ -195,17 +195,28 @@ else:
 
 # ========= 左侧图像列表 =========
 st.sidebar.subheader("📂 图像列表")
+
 labels = []
 for idx, img_info in enumerate(image_list):
     uid = f"{img_info['filename']}_{img_info['method']}"
-    label = f"图像{idx+1}"
+    # 根据语言生成标签
+    if LANG == "中文":
+        label = f"图像{idx+1}"
+    else:
+        label = f"Image {idx+1}"
+    # 已评分加 ✅
     if uid in rated_set:
         label += " ✅"
     labels.append(label)
 
-selected_label = st.sidebar.radio("选择图像", labels, index=st.session_state.selected_image_idx)
+selected_label = st.sidebar.radio(
+    "选择图像" if LANG == "中文" else "Select Image",
+    labels,
+    index=st.session_state.selected_image_idx
+)
 st.session_state.selected_image_idx = labels.index(selected_label)
 info = image_list[st.session_state.selected_image_idx]
+
 
 # ========= 主界面 =========
 st.markdown(f"<h2>🧑‍⚕️ {selected_modality} {T['title']}</h2>", unsafe_allow_html=True)
@@ -227,23 +238,13 @@ with col1:
 
 with col2:
     st.subheader(T["score_title"])
+    # 使用 form 包裹滑条和保存按钮
     with st.form("rating_form"):
-        items = [
-            {"key": "sharpness", "name": T['sharpness'][0], "desc": T['sharpness'][1]},
-            {"key": "artifact", "name": T['artifact'][0], "desc": T['artifact'][1]},
-            {"key": "naturalness", "name": T['naturalness'][0], "desc": T['naturalness'][1]},
-            {"key": "diagnostic_confidence", "name": T['diagnostic'][0], "desc": T['diagnostic'][1]},
-        ]
+        metrics = ["sharpness", "artifact", "naturalness", "diagnostic_confidence"]
         ratings = {}
-        for item in items:
-            key = f"{item['key']}_{st.session_state.selected_image_idx}"
-            st.markdown(f"**{item['name']}**")
-            ratings[item['key']] = st.slider(
-                " ", 1, 5, value=st.session_state.get(key, 3), key=key, label_visibility="collapsed"
-            )
-            st.caption(item['desc'])
-            st.markdown("---")
-
+        for metric in metrics:
+            key = f"{metric}_{st.session_state.selected_image_idx}"
+            ratings[metric] = st.slider(metric, 1, 5, value=st.session_state.get(key, 3), key=key)
         submitted = st.form_submit_button(T["save_next"])
         if submitted:
             row = {
