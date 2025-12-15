@@ -227,43 +227,44 @@ with col1:
 
 with col2:
     st.subheader(T["score_title"])
-    metrics = ["sharpness", "artifact", "naturalness", "diagnostic_confidence"]
-    ratings = {}
-    for metric in metrics:
-        key = f"{metric}_{st.session_state.selected_image_idx}"
-        ratings[metric] = st.slider(metric, 1, 5, value=st.session_state.get(key, 3), key=key)
+    # 使用 form 包裹滑条和保存按钮
+    with st.form("rating_form"):
+        metrics = ["sharpness", "artifact", "naturalness", "diagnostic_confidence"]
+        ratings = {}
+        for metric in metrics:
+            key = f"{metric}_{st.session_state.selected_image_idx}"
+            ratings[metric] = st.slider(metric, 1, 5, value=st.session_state.get(key, 3), key=key)
+        submitted = st.form_submit_button(T["save_next"])
+        if submitted:
+            row = {
+                "name": user_name,
+                "institution": user_institution,
+                "years_of_experience": user_years,
+                "modality": info["modality"],
+                "method": info["method"],
+                "filename": info["filename"],
+                **ratings
+            }
+            if os.path.exists(SAVE_FILE):
+                df = pd.read_csv(SAVE_FILE, encoding="utf-8")
+            else:
+                df = pd.DataFrame(columns=COLUMNS)
 
-    if st.button(T["save_next"], type="primary", use_container_width=True):
-        row = {
-            "name": user_name,
-            "institution": user_institution,
-            "years_of_experience": user_years,
-            "modality": info["modality"],
-            "method": info["method"],
-            "filename": info["filename"],
-            **ratings
-        }
-        # 保存 CSV（覆盖已评分行）
-        if os.path.exists(SAVE_FILE):
-            df = pd.read_csv(SAVE_FILE, encoding="utf-8")
-        else:
-            df = pd.DataFrame(columns=COLUMNS)
+            uid = f"{info['filename']}_{info['method']}"
+            existing_uids = (df["filename"] + "_" + df["method"]).values
 
-        uid = f"{info['filename']}_{info['method']}"
-        existing_uids = (df["filename"] + "_" + df["method"]).values
+            if uid in existing_uids:
+                idx = df.index[df["filename"] + "_" + df["method"] == uid][0]
+                for col in ratings:
+                    df.at[idx, col] = ratings[col]
+                df.at[idx, "name"] = user_name
+                df.at[idx, "institution"] = user_institution
+                df.at[idx, "years_of_experience"] = user_years
+            else:
+                df = pd.concat([df, pd.DataFrame([row])], ignore_index=True)
 
-        if uid in existing_uids:
-            idx = df.index[df["filename"] + "_" + df["method"] == uid][0]
-            for col in ratings:
-                df.at[idx, col] = ratings[col]
-            df.at[idx, "name"] = user_name
-            df.at[idx, "institution"] = user_institution
-            df.at[idx, "years_of_experience"] = user_years
-        else:
-            df = pd.concat([df, pd.DataFrame([row])], ignore_index=True)
-
-        df.to_csv(SAVE_FILE, index=False, encoding="utf-8")
-        st.toast(T["saved"], icon="✅")
+            df.to_csv(SAVE_FILE, index=False, encoding="utf-8")
+            st.toast(T["saved"], icon="✅")
 
 # ========= 数据下载 =========
 st.markdown("---")
