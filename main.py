@@ -79,37 +79,42 @@ if "user_years" not in st.session_state:
 
 # ========= 用户信息输入 =========
 st.markdown("### 🧑‍💻 评分人信息（必填）")
-col_name, col_inst, col_years = st.columns(3, gap="medium")
+
+col_name, col_institution, col_years = st.columns(3, gap="medium")
 
 with col_name:
+    st.markdown("**姓名**")
     user_name = st.text_input(
-        "姓名",
+        "",
         value=st.session_state.user_name,
         placeholder="请输入您的姓名",
         label_visibility="collapsed",
-        key="input_name",
+        key="input_name"
     )
     st.session_state.user_name = user_name
 
-with col_inst:
+with col_institution:
+    st.markdown("**医疗机构**")
     user_institution = st.text_input(
-        "医疗机构",
+        "",
         value=st.session_state.user_institution,
         placeholder="请输入您的医疗机构",
         label_visibility="collapsed",
-        key="input_institution",
+        key="input_institution"
     )
     st.session_state.user_institution = user_institution
 
 with col_years:
+    st.markdown("**从业年限（年）**")
     user_years_input = st.text_input(
-        "从业年限",
+        "",
         value=st.session_state.user_years,
-        placeholder="请输入数字（0-80，支持小数）",
+        placeholder="如 3 或 3.5",
         label_visibility="collapsed",
         key="input_years",
-        help="支持 0-80 之间的整数或小数（如 3.5）",
+        help="支持 0-80 之间的整数或小数"
     )
+
 
 # ========= 从业年限校验 =========
 user_years = 0.0
