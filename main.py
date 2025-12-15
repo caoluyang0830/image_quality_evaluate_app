@@ -222,10 +222,9 @@ else:
         if missing_cols:
             for col in missing_cols:
                 df_existing[col] = "" if col == "rating_time" else 0
-        # 关键修复1：去重，按filename+method保留最后一条记录
+        # 去重，按filename+method保留最后一条记录（后台保留，不显示给用户）
         if not df_existing.empty:
             initial_count = len(df_existing)
-            # 按filename和method分组，保留最后一条（最新的）记录
             df_existing = df_existing.drop_duplicates(subset=["filename", "method"], keep="last").reset_index(drop=True)
             if len(df_existing) < initial_count:
                 st.warning(T["duplicate_warn"])
@@ -249,7 +248,7 @@ try:
                     if os.path.exists(filepath) and os.path.getsize(filepath) > 0:
                         image_list.append({
                             "modality": selected_modality,
-                            "method": method,
+                            "method": method,  # 后台保留，不显示
                             "filename": f,
                             "filepath": filepath
                         })
@@ -277,10 +276,10 @@ rated_set = set()
 df_rated = pd.DataFrame(columns=COLUMNS)
 try:
     df_rated = pd.read_csv(SAVE_FILE, encoding="utf-8-sig")
-    # 再次去重，确保安全性
+    # 再次去重（后台操作）
     df_rated = df_rated.drop_duplicates(subset=["filename", "method"], keep="last").reset_index(drop=True)
     df_rated["filename"] = df_rated["filename"].astype(str)
-    df_rated["method"] = df_rated["method"].astype(str)
+    df_rated["method"] = df_rated["method"].astype(str)  # 后台保留
     rated_set = set(df_rated["filename"] + "_" + df_rated["method"])
 except Exception as e:
     st.warning(f"⚠️ 读取已评分数据失败，重新开始: {str(e)}")
@@ -292,7 +291,7 @@ labels = []
 for idx, img_info in enumerate(image_list):
     uid = f"{img_info['filename']}_{img_info['method']}"
     label = f"图像{idx+1}" if LANG == "中文" else f"Image {idx+1}"
-    label += f" - {img_info['method']}"
+    # 移除方法名称显示
     if uid in rated_set:
         label += " ✅"
     labels.append(label)
@@ -372,7 +371,8 @@ with col1:
             st.image(img_resized, caption=f"{labels[current_idx]} ({info['filename']})", use_container_width=True)
         else:
             st.image(img, caption=f"{labels[current_idx]} ({info['filename']})", use_container_width=True)
-    st.caption(f"{current_idx + 1}/{len(image_list)} | {T['select_image']}: {info['method']}")
+    # 移除方法显示，只保留图像序号
+    st.caption(f"{current_idx + 1}/{len(image_list)}")
 
 with col2:
     st.subheader(T["score_title"])
@@ -421,15 +421,15 @@ with col2:
         with col_save_next:
             submit_save_next = st.form_submit_button(T["save_next"])
         
-        # 处理表单提交 - 关键修复2：优化更新逻辑
+        # 处理表单提交
         if submit_save or submit_save_next:
-            # 构建评分数据（严格按照COLUMNS顺序）
+            # 构建评分数据（后台保留method，不显示）
             row_data = {
                 "name": st.session_state.user_name,
                 "institution": st.session_state.user_institution,
                 "years_of_experience": user_years,
                 "modality": info["modality"],
-                "method": info["method"],
+                "method": info["method"],  # 后台保留
                 "filename": info["filename"],
                 "sharpness": ratings["sharpness"],
                 "artifact": ratings["artifact"],
@@ -441,7 +441,6 @@ with col2:
             # 读取现有数据并去重
             try:
                 df = pd.read_csv(SAVE_FILE, encoding="utf-8-sig")
-                # 再次去重，确保没有重复记录
                 df = df.drop_duplicates(subset=["filename", "method"], keep="last").reset_index(drop=True)
             except:
                 df = pd.DataFrame(columns=COLUMNS)
@@ -451,16 +450,16 @@ with col2:
             
             try:
                 if existing_mask.any():
-                    # 关键修复3：不使用整体赋值，而是逐列更新（避免索引不匹配）
-                    idx = df[existing_mask].index[0]  # 获取唯一匹配的索引
+                    # 逐列更新
+                    idx = df[existing_mask].index[0]
                     for col in COLUMNS:
                         df.at[idx, col] = row_data[col]
                 else:
-                    # 添加新行（确保列顺序一致）
+                    # 添加新行
                     new_row = pd.DataFrame([row_data], columns=COLUMNS)
                     df = pd.concat([df, new_row], ignore_index=True)
                 
-                # 保存前再次去重（双重保险）
+                # 保存前再次去重
                 df = df.drop_duplicates(subset=["filename", "method"], keep="last").reset_index(drop=True)
                 df.to_csv(SAVE_FILE, index=False, encoding="utf-8-sig")
                 
@@ -482,9 +481,9 @@ try:
     df_download = pd.read_csv(SAVE_FILE, encoding="utf-8-sig")
     df_download = df_download.drop_duplicates(subset=["filename", "method"], keep="last").reset_index(drop=True)
     if not df_download.empty:
-        show_method = st.checkbox("显示方法列 / Show Method Column", value=False)
+        # 默认不显示method列，也不提供显示选项
         display_cols = df_download.columns.tolist()
-        if not show_method and "method" in display_cols:
+        if "method" in display_cols:
             display_cols.remove("method")
         
         st.dataframe(df_download[display_cols], use_container_width=True, height=300)
