@@ -49,9 +49,9 @@ TEXT = {
         "progress": "当前进度",
         "preview": "图像预览",
         "score_title": "📊 评分指标",
-        "save_next": "💾 保存并下一张",
+        "save_next": "💾 保存评分",
         "saved": "✅ 已保存",
-        "finished": "🎉 您的评分已全部完成！",
+        "finished": "🎉 所有图像已评分完成！",
         "download_title": "📥 我的评分数据",
         "download": "📤 下载 CSV",
         "no_data": "暂无评分数据",
@@ -60,7 +60,6 @@ TEXT = {
         "artifact": ("伪影", "1=多，5=少"),
         "naturalness": ("真实感", "1=不符合，5=符合"),
         "diagnostic": ("可诊断性", "1=不足，5=足够"),
-        "rerate_title": "🔄 重新评分已评分图像",
     },
     "English": {
         "title": "Multi-Metric Image Subjective Scoring System",
@@ -78,7 +77,7 @@ TEXT = {
         "progress": "Progress",
         "preview": "Image Preview",
         "score_title": "📊 Scoring Metrics",
-        "save_next": "💾 Save & Next",
+        "save_next": "💾 Save Rating",
         "saved": "✅ Saved",
         "finished": "🎉 All images have been rated!",
         "download_title": "📥 My Rating Data",
@@ -89,7 +88,6 @@ TEXT = {
         "artifact": ("Artifacts", "1=Many, 5=Few"),
         "naturalness": ("Naturalness", "1=Unrealistic, 5=Realistic"),
         "diagnostic": ("Diagnostic Confidence", "1=Low, 5=High"),
-        "rerate_title": "🔄 Re-rate Already Rated Images",
     },
 }
 
@@ -105,10 +103,9 @@ if not os.path.exists(IMAGE_ROOT):
 modalities = []
 for m in sorted(os.listdir(IMAGE_ROOT)):
     m_path = os.path.join(IMAGE_ROOT, m)
-    if not os.path.isdir(m_path):
-        continue
-    if any(f.lower().endswith((".jpg", ".jpeg", ".png")) for _, _, files in os.walk(m_path) for f in files):
-        modalities.append(m)
+    if os.path.isdir(m_path):
+        if any(f.lower().endswith((".jpg", ".jpeg", ".png")) for _, _, files in os.walk(m_path) for f in files):
+            modalities.append(m)
 
 if not modalities:
     st.error(f"❌ {IMAGE_ROOT} 目录下未找到包含图片的模态文件夹！")
@@ -117,10 +114,12 @@ if not modalities:
 selected_modality = st.selectbox(T["select_modality"], modalities)
 
 # ========= 初始化 SessionState =========
-st.session_state.setdefault("idx", 0)
-st.session_state.setdefault("user_name", "")
-st.session_state.setdefault("user_institution", "")
-st.session_state.setdefault("user_years", "")
+if "user_name" not in st.session_state:
+    st.session_state.user_name = ""
+if "user_institution" not in st.session_state:
+    st.session_state.user_institution = ""
+if "user_years" not in st.session_state:
+    st.session_state.user_years = ""
 
 # ========= 用户信息输入 =========
 st.markdown(f"### {T['rater_info']}")
@@ -159,25 +158,27 @@ SAVE_FILE = f"{selected_modality}_{sanitize_filename(user_name)}_ratings.csv" if
 
 # ========= 用户信息校验 =========
 if not user_name:
-    st.warning(T["name_warn"]); st.stop()
+    st.warning(T["name_warn"])
+    st.stop()
 if not user_institution:
-    st.warning(T["inst_warn"]); st.stop()
+    st.warning(T["inst_warn"])
+    st.stop()
 if user_years <= 0.0:
-    st.warning(T["years_warn"]); st.stop()
+    st.warning(T["years_warn"])
+    st.stop()
 
 # ========= 初始化 / 修复 CSV =========
 COLUMNS = [
-    "name", "institution", "years_of_experience", "modality", "method", "filename",
-    "sharpness", "artifact", "naturalness", "diagnostic_confidence"
+    "name","institution","years_of_experience","modality","method","filename",
+    "sharpness","artifact","naturalness","diagnostic_confidence",
 ]
-
 if SAVE_FILE and not os.path.exists(SAVE_FILE):
     pd.DataFrame(columns=COLUMNS).to_csv(SAVE_FILE, index=False, encoding="utf-8")
 elif SAVE_FILE and os.path.exists(SAVE_FILE):
     df_exist = pd.read_csv(SAVE_FILE, encoding="utf-8")
     for col in COLUMNS:
         if col not in df_exist.columns:
-            df_exist[col] = 0.0 if col == "years_of_experience" else ""
+            df_exist[col] = 0.0 if col=="years_of_experience" else ""
     df_exist = df_exist[COLUMNS]
     df_exist.to_csv(SAVE_FILE, index=False, encoding="utf-8")
 
@@ -197,107 +198,75 @@ for method in sorted(os.listdir(modality_path)):
                 "filepath": os.path.normpath(os.path.join(method_path, f)),
             })
 if not image_list:
-    st.error(f"❌ 模态 {selected_modality} 下未找到图片！"); st.stop()
+    st.error(f"❌ 模态 {selected_modality} 下未找到图片！")
+    st.stop()
 
 # ========= 已评分集合 =========
 rated_set = set()
-df_rated = pd.DataFrame()
 if SAVE_FILE and os.path.exists(SAVE_FILE):
     df_rated = pd.read_csv(SAVE_FILE, encoding="utf-8").fillna("")
     if not df_rated.empty:
         rated_set = set(df_rated["filename"] + "_" + df_rated["method"])
 
-# ========= 重新评分选择 =========
-if not df_rated.empty:
-    st.markdown(f"### {T['rerate_title']}")
-    selected_rated = st.selectbox(
-        "",
-        [""] + [f"{row['filename']} | {row['method']}" for _, row in df_rated.iterrows()],
-        index=0,
-    )
-    if selected_rated:
-        filename, method = selected_rated.split(" | ")
-        for i, info in enumerate(image_list):
-            if info["filename"] == filename and info["method"] == method:
-                st.session_state.idx = i
-                break
+# ========= 图像选择 =========
+st.subheader("📋 图像列表")
+image_options = []
+image_map = {}
+for idx, info in enumerate(image_list):
+    key = f"{info['filename']}_{info['method']}"
+    status = "✅" if key in rated_set else "❌"
+    display_name = f"{idx+1}. {info['filename']} | {info['method']} | {status}"
+    image_options.append(display_name)
+    image_map[display_name] = info
 
-# ========= 跳过已评分（未选择重新评分时） =========
-while st.session_state.idx < len(image_list):
-    info = image_list[st.session_state.idx]
-    if f"{info['filename']}_{info['method']}" in rated_set and (not df_rated.empty and not selected_rated):
-        st.session_state.idx += 1
-    else:
-        break
+selected_image_display = st.selectbox("选择要评分的图像", image_options)
+selected_info = image_map[selected_image_display]
 
-# ========= 主界面 =========
-st.markdown(
-    f"<h2>🧑‍⚕️ {selected_modality} {T['title']}</h2>"
-    f"<p style='color:#666;'>{user_name}（{user_institution} | {user_years} yrs） | {T['mos']}</p>",
-    unsafe_allow_html=True,
-)
+# ========= 显示选中图像 =========
+try:
+    img = Image.open(selected_info["filepath"])
+    if img.mode=="RGBA":
+        img = img.convert("RGB")
+except Exception as e:
+    st.error(f"❌ 图片加载失败：{selected_info['filename']} | {e}")
+    st.stop()
 
-total = len(image_list)
-completed = len(rated_set)
-progress = completed / total if total > 0 else 0
-st.progress(progress, text=f"{T['progress']}：{completed}/{total}（{progress:.1%}）")
+col1, col2 = st.columns([3,4], gap="large")
+with col1:
+    st.subheader(T["preview"])
+    st.image(img, caption=selected_info["filename"], use_container_width=True)
 
-# ========= 评分流程 =========
-if st.session_state.idx >= len(image_list):
-    st.success(T["finished"])
-    st.balloons()
-else:
-    info = image_list[st.session_state.idx]
-    try:
-        img = Image.open(info["filepath"])
-        if img.mode == "RGBA": img = img.convert("RGB")
-    except Exception as e:
-        st.error(f"❌ 图片加载失败：{info['filename']} | {e}")
-        st.session_state.idx += 1
-        st.rerun()
+# ========= 评分界面 =========
+with col2:
+    st.subheader(T["score_title"])
+    items = [
+        ("sharpness", *T["sharpness"]),
+        ("artifact", *T["artifact"]),
+        ("naturalness", *T["naturalness"]),
+        ("diagnostic_confidence", *T["diagnostic"]),
+    ]
+    ratings = {}
+    for k, name, desc in items:
+        st.markdown(f"**{name}**")
+        ratings[k] = st.slider(
+            " ", 1, 5, 3, key=f"{k}_{selected_info['filename']}_{selected_info['method']}", label_visibility="collapsed"
+        )
+        st.caption(desc)
+        st.markdown("---")
 
-    col1, col2 = st.columns([3, 4], gap="large")
-    with col1:
-        st.subheader(T["preview"])
-        st.image(img, caption=info["filename"], use_container_width=True)
-        st.caption(f"{st.session_state.idx + 1}/{total}")
-
-    with col2:
-        st.subheader(T["score_title"])
-        items = [
-            ("sharpness", *T["sharpness"]),
-            ("artifact", *T["artifact"]),
-            ("naturalness", *T["naturalness"]),
-            ("diagnostic_confidence", *T["diagnostic"]),
-        ]
-        ratings = {}
-        for k, name, desc in items:
-            st.markdown(f"**{name}**")
-            ratings[k] = st.slider(" ", 1, 5, 3, key=f"{k}_{st.session_state.idx}", label_visibility="collapsed")
-            st.caption(desc)
-            st.markdown("---")
-
-        if st.button(T["save_next"], type="primary", use_container_width=True):
-            row = {
-                "name": user_name,
-                "institution": user_institution,
-                "years_of_experience": user_years,
-                "modality": info["modality"],
-                "method": info["method"],
-                "filename": info["filename"],
-                **ratings,
-            }
-            df = pd.read_csv(SAVE_FILE, encoding="utf-8")
-            mask = (df["filename"] == info["filename"]) & (df["method"] == info["method"])
-            if mask.any():
-                df.loc[mask, :] = pd.DataFrame([row])
-            else:
-                df = pd.concat([df, pd.DataFrame([row])], ignore_index=True)
-            df.to_csv(SAVE_FILE, index=False, encoding="utf-8")
-
-            st.session_state.idx += 1
-            st.toast(T["saved"], icon="✅")
-            st.rerun()
+    if st.button(T["save_next"], type="primary", use_container_width=True):
+        row = {
+            "name": user_name,
+            "institution": user_institution,
+            "years_of_experience": user_years,
+            "modality": selected_info["modality"],
+            "method": selected_info["method"],
+            "filename": selected_info["filename"],
+            **ratings,
+        }
+        pd.DataFrame([row]).to_csv(SAVE_FILE, mode="a", header=False, index=False, encoding="utf-8")
+        st.toast(T["saved"], icon="✅")
+        st.experimental_rerun()
 
 # ========= 数据下载 =========
 st.markdown("---")
@@ -306,6 +275,12 @@ if SAVE_FILE and os.path.exists(SAVE_FILE):
     df = pd.read_csv(SAVE_FILE, encoding="utf-8")
     st.dataframe(df.drop(columns=["method"]), use_container_width=True)
     with open(SAVE_FILE, "rb") as f:
-        st.download_button(T["download"], data=f, file_name=os.path.basename(SAVE_FILE), mime="text/csv", use_container_width=True)
+        st.download_button(
+            T["download"],
+            data=f,
+            file_name=os.path.basename(SAVE_FILE),
+            mime="text/csv",
+            use_container_width=True,
+        )
 else:
     st.info(T["no_data"])
