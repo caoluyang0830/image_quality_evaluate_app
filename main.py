@@ -117,9 +117,10 @@ if not modalities:
 selected_modality = st.selectbox(T["select_modality"], modalities)
 
 # ========= 初始化 SessionState =========
-for key in ["idx", "user_name", "user_institution", "user_years"]:
-    if key not in st.session_state:
-        st.session_state[key] = "" if "user" in key or key=="idx" else 0
+st.session_state.setdefault("idx", 0)
+st.session_state.setdefault("user_name", "")
+st.session_state.setdefault("user_institution", "")
+st.session_state.setdefault("user_years", "")
 
 # ========= 用户信息输入 =========
 st.markdown(f"### {T['rater_info']}")
@@ -200,13 +201,14 @@ if not image_list:
 
 # ========= 已评分集合 =========
 rated_set = set()
+df_rated = pd.DataFrame()
 if SAVE_FILE and os.path.exists(SAVE_FILE):
     df_rated = pd.read_csv(SAVE_FILE, encoding="utf-8").fillna("")
     if not df_rated.empty:
         rated_set = set(df_rated["filename"] + "_" + df_rated["method"])
 
 # ========= 重新评分选择 =========
-if SAVE_FILE and os.path.exists(SAVE_FILE) and not df_rated.empty:
+if not df_rated.empty:
     st.markdown(f"### {T['rerate_title']}")
     selected_rated = st.selectbox(
         "",
@@ -220,10 +222,10 @@ if SAVE_FILE and os.path.exists(SAVE_FILE) and not df_rated.empty:
                 st.session_state.idx = i
                 break
 
-# ========= 跳过未选择重新评分的已评分 =========
+# ========= 跳过已评分（未选择重新评分时） =========
 while st.session_state.idx < len(image_list):
     info = image_list[st.session_state.idx]
-    if f"{info['filename']}_{info['method']}" in rated_set and not (SAVE_FILE and os.path.exists(SAVE_FILE) and selected_rated):
+    if f"{info['filename']}_{info['method']}" in rated_set and (not df_rated.empty and not selected_rated):
         st.session_state.idx += 1
     else:
         break
