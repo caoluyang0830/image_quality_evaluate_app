@@ -119,7 +119,9 @@ COLUMNS = ["name", "institution", "years", "modality", "method", "filename", "sh
 if not os.path.exists(SAVE_FILE):
     pd.DataFrame(columns=COLUMNS).to_csv(SAVE_FILE, index=False)
 
-# ========= 图像列表 =========nimages = []
+# ========= 图像列表 =========
+images = []
+
 for method in os.listdir(os.path.join(IMAGE_ROOT, selected_modality)):
     p = os.path.join(IMAGE_ROOT, selected_modality, method)
     if not os.path.isdir(p):
