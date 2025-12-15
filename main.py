@@ -164,14 +164,21 @@ else:
 # ========= 左侧图像列表 =========
 st.sidebar.subheader(T["image_list"])
 labels = []
-for idx,img_info in enumerate(image_list):
+for idx, img_info in enumerate(image_list):
     uid = f"{img_info['filename']}_{img_info['method']}"
     label = f"图像{idx+1}" if LANG=="中文" else f"Image {idx+1}"
     if uid in rated_set: label += " ✅"
     labels.append(label)
 
-selected_label = st.sidebar.radio(T["select_image"], labels, index=st.session_state.selected_image_idx)
-st.session_state.selected_image_idx = labels.index(selected_label)
+# radio 直接用 session_state key
+selected_label = st.sidebar.radio(
+    T["select_image"],
+    labels,
+    index=st.session_state.selected_image_idx,
+    key="selected_image_idx"  # 直接用 session_state key
+)
+
+# 读取选择的图像
 info = image_list[st.session_state.selected_image_idx]
 
 # ========= 主界面 =========
