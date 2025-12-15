@@ -145,7 +145,7 @@ st.markdown(f"### {T['rater_info']}")
 col_name, col_inst, col_years = st.columns(3, gap="medium")
 
 with col_name:
-    st.caption(T['name'])  # 小标题
+    st.caption(T['name'])
     user_name = st.text_input(
         "",
         value=st.session_state.user_name,
@@ -176,7 +176,6 @@ with col_years:
         key="input_years",
         help=T["years_help"],
     )
-
 
 # ========= 从业年限校验 =========
 user_years = 0.0
@@ -273,7 +272,7 @@ while st.session_state.idx < len(image_list):
     else:
         break
 
-# ========= 主界面 =========
+# ========= 渲染主界面 =========
 st.markdown(
     f"""
     <h2>🧑‍⚕️ {selected_modality} {T['title']}</h2>
@@ -289,26 +288,45 @@ completed = len(rated_set)
 progress = completed / total if total > 0 else 0
 st.progress(progress, text=f"{T['progress']}：{completed}/{total}（{progress:.1%}）")
 
-# ========= 评分流程 =========
-if st.session_state.idx >= len(image_list):
-    st.success(T["finished"])
-    st.balloons()
-else:
-    info = image_list[st.session_state.idx]
+# ========= 保存评分函数 =========
+def save_rating(info, ratings):
+    row = {
+        "name": user_name,
+        "institution": user_institution,
+        "years_of_experience": user_years,
+        "modality": info["modality"],
+        "method": info["method"],
+        "filename": info["filename"],
+        **ratings,
+    }
+
+    df_exist = pd.read_csv(SAVE_FILE, encoding="utf-8") if os.path.exists(SAVE_FILE) else pd.DataFrame(columns=COLUMNS)
+    # 覆盖已有行
+    df_exist = df_exist[
+        ~((df_exist["filename"] == info["filename"]) & (df_exist["method"] == info["method"]))
+    ]
+    df_exist = pd.concat([df_exist, pd.DataFrame([row])], ignore_index=True)
+    df_exist.to_csv(SAVE_FILE, index=False, encoding="utf-8")
+
+# ========= 渲染当前图片评分界面 =========
+def render_image_rating(idx):
+    info = image_list[idx]
+
+    # 加载图片
     try:
         img = Image.open(info["filepath"])
         if img.mode == "RGBA":
             img = img.convert("RGB")
     except Exception as e:
         st.error(f"❌ 图片加载失败：{info['filename']} | {e}")
-        st.session_state.idx += 1
-        st.rerun()
+        return
 
+    # 左右布局
     col1, col2 = st.columns([3, 4], gap="large")
     with col1:
         st.subheader(T["preview"])
         st.image(img, caption=info["filename"], use_container_width=True)
-        st.caption(f"{st.session_state.idx + 1}/{total}")
+        st.caption(f"{idx + 1}/{len(image_list)}")
 
     with col2:
         st.subheader(T["score_title"])
@@ -329,7 +347,7 @@ else:
             st.markdown(f"**{name}**")
             default_val = int(exist_row[k].values[0]) if not exist_row.empty else 3
             ratings[k] = st.slider(
-                " ", 1, 5, default_val, key=f"{k}_{st.session_state.idx}", label_visibility="collapsed"
+                " ", 1, 5, default_val, key=f"{k}_{idx}", label_visibility="collapsed"
             )
             st.caption(desc)
             st.markdown("---")
@@ -338,48 +356,28 @@ else:
         btn_col1, btn_col2 = st.columns(2, gap="small")
         with btn_col1:
             if st.button("⬅️ 上一张", use_container_width=True):
+                save_rating(info, ratings)
                 if st.session_state.idx > 0:
-                    # 保存当前评分
-                    row = {
-                        "name": user_name,
-                        "institution": user_institution,
-                        "years_of_experience": user_years,
-                        "modality": info["modality"],
-                        "method": info["method"],
-                        "filename": info["filename"],
-                        **ratings,
-                    }
-                    # 如果已存在则覆盖
-                    df_exist = df_exist[
-                        ~((df_exist["filename"] == info["filename"]) & (df_exist["method"] == info["method"]))
-                    ]
-                    df_exist = pd.concat([df_exist, pd.DataFrame([row])], ignore_index=True)
-                    df_exist.to_csv(SAVE_FILE, index=False, encoding="utf-8")
-
                     st.session_state.idx -= 1
                     st.rerun()
 
         with btn_col2:
             if st.button(T["save_next"], type="primary", use_container_width=True):
-                row = {
-                    "name": user_name,
-                    "institution": user_institution,
-                    "years_of_experience": user_years,
-                    "modality": info["modality"],
-                    "method": info["method"],
-                    "filename": info["filename"],
-                    **ratings,
-                }
-                # 如果已存在则覆盖
-                df_exist = df_exist[
-                    ~((df_exist["filename"] == info["filename"]) & (df_exist["method"] == info["method"]))
-                ]
-                df_exist = pd.concat([df_exist, pd.DataFrame([row])], ignore_index=True)
-                df_exist.to_csv(SAVE_FILE, index=False, encoding="utf-8")
+                save_rating(info, ratings)
+                if st.session_state.idx < len(image_list) - 1:
+                    st.session_state.idx += 1
+                    st.toast(T["saved"], icon="✅")
+                    st.rerun()
+                else:
+                    st.success(T["finished"])
+                    st.balloons()
 
-                st.session_state.idx += 1
-                st.toast(T["saved"], icon="✅")
-                st.rerun()
+# ========= 显示评分或完成提示 =========
+if st.session_state.idx < len(image_list):
+    render_image_rating(st.session_state.idx)
+else:
+    st.success(T["finished"])
+    st.balloons()
 
 # ========= 数据下载 =========
 st.markdown("---")
