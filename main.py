@@ -194,7 +194,7 @@ else:
     rated_set = set()
 
 # ========= 左侧图像列表 =========
-st.sidebar.subheader("📂 图像列表")
+st.sidebar.subheader("📂 图像列表" if LANG=="中文" else "📂 Image List")
 
 labels = []
 for idx, img_info in enumerate(image_list):
