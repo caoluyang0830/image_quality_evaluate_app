@@ -170,13 +170,6 @@ COLUMNS = [
 
 if not os.path.exists(SAVE_FILE):
     pd.DataFrame(columns=COLUMNS).to_csv(SAVE_FILE, index=False, encoding="utf-8")
-else:
-    df_exist = pd.read_csv(SAVE_FILE, encoding="utf-8")
-    for col in COLUMNS:
-        if col not in df_exist.columns:
-            df_exist[col] = 0.0 if col == "years_of_experience" else ""
-    df_exist = df_exist[COLUMNS]
-    df_exist.to_csv(SAVE_FILE, index=False, encoding="utf-8")
 
 # ========= 加载图像列表 =========
 image_list = []
@@ -193,13 +186,6 @@ if not image_list:
     st.error(f"❌ 模态 {selected_modality} 下未找到图片！")
     st.stop()
 
-# ========= 已评分集合 =========
-rated_set = set()
-if os.path.exists(SAVE_FILE):
-    df_rated = pd.read_csv(SAVE_FILE, encoding="utf-8").fillna("")
-    if not df_rated.empty:
-        rated_set = set(df_rated["filename"] + "_" + df_rated["method"])
-
 # ========= 左侧图像列表 =========
 st.sidebar.subheader("📂 图像列表")
 image_options = [f"图像{i+1}" for i in range(len(image_list))]
@@ -209,6 +195,14 @@ info = image_list[st.session_state.selected_image_idx]
 
 # ========= 主界面 =========
 st.markdown(f"<h2>🧑‍⚕️ {selected_modality} {T['title']}</h2>", unsafe_allow_html=True)
+
+# 加载已评分集合，用于进度条
+if os.path.exists(SAVE_FILE):
+    df_rated = pd.read_csv(SAVE_FILE, encoding="utf-8")
+    rated_set = set(df_rated["filename"] + "_" + df_rated["method"])
+else:
+    rated_set = set()
+
 progress_val = len(rated_set)/len(image_list) if image_list else 0
 st.progress(progress_val, text=f"{T['progress']}：{len(rated_set)}/{len(image_list)}")
 
@@ -233,13 +227,44 @@ with col2:
         key = f"{metric}_{st.session_state.selected_image_idx}"
         ratings[metric] = st.slider(metric, 1, 5, value=st.session_state.get(key, 3), key=key)
 
+    # ===== 保存并覆盖已评分行 =====
     if st.button(T["save_next"], type="primary", use_container_width=True):
         row = {
-            "name": user_name, "institution": user_institution, "years_of_experience": user_years,
-            "modality": info["modality"], "method": info["method"], "filename": info["filename"], **ratings
+            "name": user_name,
+            "institution": user_institution,
+            "years_of_experience": user_years,
+            "modality": info["modality"],
+            "method": info["method"],
+            "filename": info["filename"],
+            **ratings
         }
-        pd.DataFrame([row]).to_csv(SAVE_FILE, mode="a", header=False, index=False, encoding="utf-8")
+
+        # 读取 CSV
+        if os.path.exists(SAVE_FILE):
+            df = pd.read_csv(SAVE_FILE, encoding="utf-8")
+        else:
+            df = pd.DataFrame(columns=COLUMNS)
+
+        uid = f"{info['filename']}_{info['method']}"
+        existing_uids = (df["filename"] + "_" + df["method"]).values
+
+        if uid in existing_uids:
+            # 更新原行
+            idx = df.index[df["filename"] + "_" + df["method"] == uid][0]
+            for col in ratings:
+                df.at[idx, col] = ratings[col]
+            # 更新用户信息
+            df.at[idx, "name"] = user_name
+            df.at[idx, "institution"] = user_institution
+            df.at[idx, "years_of_experience"] = user_years
+        else:
+            # 新行追加
+            df = pd.concat([df, pd.DataFrame([row])], ignore_index=True)
+
+        df.to_csv(SAVE_FILE, index=False, encoding="utf-8")
         st.toast(T["saved"], icon="✅")
+
+        # 跳到下一张
         st.session_state.selected_image_idx = min(st.session_state.selected_image_idx + 1, len(image_list)-1)
         st.rerun()
 
