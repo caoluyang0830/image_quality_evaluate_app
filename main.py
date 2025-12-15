@@ -4,6 +4,7 @@ import os
 import pandas as pd
 import warnings
 import re
+from datetime import datetime
 
 # ================= 基础设置 =================
 warnings.filterwarnings("ignore")
@@ -27,12 +28,13 @@ st.set_page_config(
 )
 
 # ========= 语言选择 =========
-# 语言选择放在前面，避免切换语言后状态异常
-if "LANG" not in st.session_state:
+# 确保LANG在session_state中且为有效类型
+if "LANG" not in st.session_state or st.session_state["LANG"] not in ["中文", "English"]:
     st.session_state["LANG"] = "中文"
 
 def update_lang():
-    st.session_state["selected_image_idx"] = 0  # 切换语言时重置图像选择索引
+    # 切换语言时重置图像选择索引，确保是整数
+    st.session_state["selected_image_idx"] = 0
 
 LANG = st.selectbox("🌐 Language / 语言", ["中文", "English"], 
                    index=0 if st.session_state["LANG"] == "中文" else 1,
@@ -72,7 +74,8 @@ TEXT = {
         "image_load_fail": "图片加载失败",
         "no_modalities": "未找到任何模态文件夹",
         "go_next": "前往下一张",
-        "go_prev": "返回上一张"
+        "go_prev": "返回上一张",
+        "init_error": "初始化失败，请刷新页面重试"
     },
     "English": {
         "title": "Multi-Metric Image Subjective Scoring System",
@@ -106,7 +109,8 @@ TEXT = {
         "image_load_fail": "Image load failed",
         "no_modalities": "No modality folders found",
         "go_next": "Go to next",
-        "go_prev": "Go to previous"
+        "go_prev": "Go to previous",
+        "init_error": "Initialization failed, please refresh the page and try again"
     }
 }
 
@@ -119,17 +123,23 @@ if not os.path.exists(IMAGE_ROOT):
     st.stop()
 
 # ========= 模态选择 =========
-modalities = [m for m in sorted(os.listdir(IMAGE_ROOT)) if os.path.isdir(os.path.join(IMAGE_ROOT, m))]
+try:
+    modalities = [m for m in sorted(os.listdir(IMAGE_ROOT)) if os.path.isdir(os.path.join(IMAGE_ROOT, m))]
+except Exception as e:
+    st.error(f"❌ 读取模态文件夹失败: {str(e)}")
+    st.stop()
+
 if not modalities:
     st.error(f"❌ {T['no_modalities']}")
     st.stop()
 
 # 初始化模态选择状态
-if "selected_modality" not in st.session_state:
+if "selected_modality" not in st.session_state or st.session_state["selected_modality"] not in modalities:
     st.session_state["selected_modality"] = modalities[0]
 
 def update_modality():
-    st.session_state["selected_image_idx"] = 0  # 切换模态时重置图像选择索引
+    # 切换模态时重置图像选择索引，确保是整数
+    st.session_state["selected_image_idx"] = 0
 
 selected_modality = st.selectbox(T["modality_select"], modalities,
                                index=modalities.index(st.session_state["selected_modality"]),
@@ -140,7 +150,14 @@ st.session_state["selected_modality"] = selected_modality
 required_keys = ["user_name", "user_institution", "user_years", "selected_image_idx"]
 for key in required_keys:
     if key not in st.session_state:
-        st.session_state[key] = "" if "user" in key else 0
+        if "user" in key:
+            st.session_state[key] = ""
+        else:
+            st.session_state[key] = 0  # 确保是整数类型
+    else:
+        # 确保selected_image_idx是整数
+        if key == "selected_image_idx" and not isinstance(st.session_state[key], int):
+            st.session_state[key] = 0
 
 # ========= 用户信息输入 =========
 st.markdown(f"### {T['rater_info']}")
@@ -223,42 +240,59 @@ else:
 image_list = []
 modality_path = os.path.join(IMAGE_ROOT, selected_modality)
 try:
-    for method in sorted(os.listdir(modality_path)):
-        method_path = os.path.join(modality_path, method)
-        if not os.path.isdir(method_path):
-            continue
-        # 获取所有支持的图片格式
-        for f in sorted(os.listdir(method_path)):
-            if f.lower().endswith((".jpg", ".jpeg", ".png", ".bmp", ".tiff")):
-                filepath = os.path.join(method_path, f)
-                # 检查文件是否可读
-                if os.path.getsize(filepath) > 0:
-                    image_list.append({
-                        "modality": selected_modality,
-                        "method": method,
-                        "filename": f,
-                        "filepath": filepath
-                    })
+    # 确保路径存在
+    if os.path.exists(modality_path):
+        for method in sorted(os.listdir(modality_path)):
+            method_path = os.path.join(modality_path, method)
+            if not os.path.isdir(method_path):
+                continue
+            # 获取所有支持的图片格式
+            for f in sorted(os.listdir(method_path)):
+                if f.lower().endswith((".jpg", ".jpeg", ".png", ".bmp", ".tiff")):
+                    filepath = os.path.join(method_path, f)
+                    # 检查文件是否可读且不为空
+                    if os.path.exists(filepath) and os.path.getsize(filepath) > 0:
+                        image_list.append({
+                            "modality": selected_modality,
+                            "method": method,
+                            "filename": f,
+                            "filepath": filepath
+                        })
+    else:
+        st.error(f"❌ 模态路径不存在: {modality_path}")
 except Exception as e:
-    st.error(f"❌ 读取图像列表失败: {e}")
+    st.error(f"❌ 读取图像列表失败: {str(e)}")
     st.stop()
 
 if not image_list:
     st.error(f"❌ {T['no_data']} in {selected_modality}!")
     st.stop()
 
-# 确保选中的图像索引有效
-if st.session_state.selected_image_idx >= len(image_list):
+# ========= 关键修复：确保selected_image_idx是整数且在有效范围内 =========
+try:
+    # 强制转换为整数
+    selected_idx = int(st.session_state.selected_image_idx)
+    # 确保索引在有效范围内
+    if selected_idx < 0 or selected_idx >= len(image_list):
+        selected_idx = 0
+    # 更新session_state
+    st.session_state.selected_image_idx = selected_idx
+except (ValueError, TypeError):
+    # 如果转换失败，重置为0
     st.session_state.selected_image_idx = 0
 
 # ========= 已评分集合 =========
+rated_set = set()
 try:
     df_rated = pd.read_csv(SAVE_FILE, encoding="utf-8-sig")
     # 清理无效数据
     df_rated = df_rated.dropna(subset=["filename", "method"])
+    # 确保filename和method是字符串类型
+    df_rated["filename"] = df_rated["filename"].astype(str)
+    df_rated["method"] = df_rated["method"].astype(str)
     rated_set = set(df_rated["filename"] + "_" + df_rated["method"])
 except Exception as e:
-    st.warning(f"⚠️ 读取已评分数据失败，重新开始: {e}")
+    st.warning(f"⚠️ 读取已评分数据失败，重新开始: {str(e)}")
     rated_set = set()
     pd.DataFrame(columns=COLUMNS).to_csv(SAVE_FILE, index=False, encoding="utf-8-sig")
 
@@ -273,21 +307,30 @@ for idx, img_info in enumerate(image_list):
         label += " ✅"
     labels.append(label)
 
-# 图像选择单选框
+# 图像选择单选框 - 确保index是有效的整数
+current_idx = st.session_state.selected_image_idx
+if current_idx >= len(labels):
+    current_idx = 0
+    st.session_state.selected_image_idx = current_idx
+
 selected_label = st.sidebar.radio(
     T["select_image"],
     labels,
-    index=st.session_state.selected_image_idx,
-    key="selected_image_idx"
+    index=current_idx,
+    key="selected_image_idx_radio"  # 使用不同的key避免冲突
 )
 
-# 获取当前选择的图像信息
+# 更新session_state中的索引
+st.session_state.selected_image_idx = labels.index(selected_label) if selected_label in labels else 0
 current_idx = st.session_state.selected_image_idx
+
+# 获取当前选择的图像信息
 if 0 <= current_idx < len(image_list):
     info = image_list[current_idx]
 else:
     info = image_list[0]
-    st.session_state.selected_image_idx = 0
+    current_idx = 0
+    st.session_state.selected_image_idx = current_idx
 
 # ========= 导航按钮 =========
 def go_prev():
@@ -321,9 +364,14 @@ except Exception as e:
     st.error(f"❌ {T['image_load_fail']}: {info['filename']} | {str(e)[:100]}")
     # 移除损坏的图像
     st.warning(f"⚠️ 移除损坏的图像: {info['filename']}")
-    image_list.pop(current_idx)
+    if current_idx < len(image_list):
+        image_list.pop(current_idx)
+    # 更新索引
     if current_idx >= len(image_list) and len(image_list) > 0:
         st.session_state.selected_image_idx = len(image_list) - 1
+    elif len(image_list) == 0:
+        st.error(f"❌ 所有图像均损坏或无法加载")
+        st.stop()
     st.rerun()
 
 # 主内容布局
@@ -356,28 +404,29 @@ with col2:
         ratings = {}
         # 检查是否已有评分，加载历史评分
         uid = f"{info['filename']}_{info['method']}"
-        initial_values = {}
+        initial_values = {item['key']: 3 for item in items}
         
         if uid in rated_set and 'df_rated' in locals():
             try:
                 rated_row = df_rated[(df_rated["filename"] == info["filename"]) & 
                                    (df_rated["method"] == info["method"])].iloc[0]
                 for item in items:
-                    initial_values[item['key']] = rated_row[item['key']] if item['key'] in rated_row else 3
-            except:
-                initial_values = {item['key']: 3 for item in items}
-        else:
-            initial_values = {item['key']: 3 for item in items}
+                    if item['key'] in rated_row and pd.notna(rated_row[item['key']]):
+                        initial_values[item['key']] = int(rated_row[item['key']])  # 确保是整数
+            except Exception as e:
+                st.warning(f"⚠️ 加载历史评分失败: {str(e)}")
         
         # 创建评分滑块
         for item in items:
             st.markdown(f"**{item['name']}**")
             key = f"rating_{item['key']}_{current_idx}"
+            # 确保初始值是整数且在1-5范围内
+            init_val = max(1, min(5, int(initial_values[item['key']])))
             ratings[item['key']] = st.slider(
                 item['key'],
                 min_value=1,
                 max_value=5,
-                value=initial_values[item['key']],
+                value=init_val,
                 key=key,
                 label_visibility="collapsed"
             )
@@ -393,8 +442,6 @@ with col2:
         
         # 处理表单提交
         if submit_save or submit_save_next:
-            from datetime import datetime
-            
             # 构建评分数据
             row = {
                 "name": st.session_state.user_name,
@@ -437,7 +484,7 @@ with col2:
                     st.session_state.selected_image_idx += 1
                     st.rerun()
             except Exception as e:
-                st.error(f"❌ 保存失败: {e}")
+                st.error(f"❌ 保存失败: {str(e)}")
 
 # ========= 数据下载 =========
 st.markdown("---")
@@ -476,5 +523,5 @@ try:
     else:
         st.info(T["no_data"])
 except Exception as e:
-    st.error(f"❌ 读取评分数据失败: {e}")
+    st.error(f"❌ 读取评分数据失败: {str(e)}")
     st.info(T["no_data"])
