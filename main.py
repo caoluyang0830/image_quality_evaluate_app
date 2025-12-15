@@ -95,35 +95,12 @@ T = TEXT[LANG]
 
 # ========= 路径配置 =========
 IMAGE_ROOT = os.path.normpath("resultselect")
-
 if not os.path.exists(IMAGE_ROOT):
-    st.error(
-        f"""
-        ❌ 图像根路径不存在: {IMAGE_ROOT}
-        请确认：
-        1. {IMAGE_ROOT} 文件夹已上传到应用根目录（和 main.py 同目录）
-        2. 文件夹名称拼写正确（区分大小写）
-        """
-    )
+    st.error(f"❌ 图像根路径不存在: {IMAGE_ROOT}")
     st.stop()
 
 # ========= 模态选择 =========
-modalities = []
-for m in sorted(os.listdir(IMAGE_ROOT)):
-    m_path = os.path.join(IMAGE_ROOT, m)
-    if not os.path.isdir(m_path):
-        continue
-    has_images = False
-    for root, _, files in os.walk(m_path):
-        for f in files:
-            if f.lower().endswith((".jpg", ".jpeg", ".png")):
-                has_images = True
-                break
-        if has_images:
-            break
-    if has_images:
-        modalities.append(m)
-
+modalities = [m for m in sorted(os.listdir(IMAGE_ROOT)) if os.path.isdir(os.path.join(IMAGE_ROOT, m))]
 if not modalities:
     st.error(f"❌ {IMAGE_ROOT} 目录下未找到包含图片的模态文件夹！")
     st.stop()
@@ -131,14 +108,9 @@ if not modalities:
 selected_modality = st.selectbox(T["select_modality"], modalities)
 
 # ========= 初始化 SessionState =========
-if "idx" not in st.session_state:
-    st.session_state.idx = 0
-if "user_name" not in st.session_state:
-    st.session_state.user_name = ""
-if "user_institution" not in st.session_state:
-    st.session_state.user_institution = ""
-if "user_years" not in st.session_state:
-    st.session_state.user_years = ""
+for key in ["idx", "user_name", "user_institution", "user_years"]:
+    if key not in st.session_state:
+        st.session_state[key] = 0 if key=="idx" else ""
 
 # ========= 用户信息输入 =========
 st.markdown(f"### {T['rater_info']}")
@@ -146,36 +118,17 @@ col_name, col_inst, col_years = st.columns(3, gap="medium")
 
 with col_name:
     st.caption(T['name'])
-    user_name = st.text_input(
-        "",
-        value=st.session_state.user_name,
-        placeholder=T["name"],
-        label_visibility="collapsed",
-        key="input_name",
-    )
+    user_name = st.text_input("", value=st.session_state.user_name, placeholder=T["name"], key="input_name")
     st.session_state.user_name = user_name
 
 with col_inst:
     st.caption(T['institution'])
-    user_institution = st.text_input(
-        "",
-        value=st.session_state.user_institution,
-        placeholder=T["institution"],
-        label_visibility="collapsed",
-        key="input_institution",
-    )
+    user_institution = st.text_input("", value=st.session_state.user_institution, placeholder=T["institution"], key="input_institution")
     st.session_state.user_institution = user_institution
 
 with col_years:
     st.caption(T['years'])
-    user_years_input = st.text_input(
-        "",
-        value=st.session_state.user_years,
-        placeholder=T["years_placeholder"],
-        label_visibility="collapsed",
-        key="input_years",
-        help=T["years_help"],
-    )
+    user_years_input = st.text_input("", value=st.session_state.user_years, placeholder=T["years_placeholder"], key="input_years", help=T["years_help"])
 
 # ========= 从业年限校验 =========
 user_years = 0.0
@@ -186,195 +139,103 @@ if user_years_input.strip():
         user_years = round(user_years, 1)
     else:
         st.error(T["years_error"])
-
 st.session_state.user_years = str(user_years)
 
-# ========= 生成用户专属 CSV =========
+# ========= CSV 文件 =========
 def sanitize_filename(name: str) -> str:
     return re.sub(r'[\\/:*?"<>|]', '_', name).strip()
 
-if user_name:
-    SAVE_FILE = os.path.normpath(
-        f"{selected_modality}_{sanitize_filename(user_name)}_ratings.csv"
-    )
-else:
-    SAVE_FILE = ""
+SAVE_FILE = os.path.normpath(f"{selected_modality}_{sanitize_filename(user_name)}_ratings.csv") if user_name else ""
+
+COLUMNS = ["name","institution","years_of_experience","modality","method","filename","sharpness","artifact","naturalness","diagnostic_confidence"]
+if SAVE_FILE and not os.path.exists(SAVE_FILE):
+    pd.DataFrame(columns=COLUMNS).to_csv(SAVE_FILE,index=False,encoding="utf-8")
 
 # ========= 用户信息校验 =========
-if not user_name:
-    st.warning(T["name_warn"])
-    st.stop()
-if not user_institution:
-    st.warning(T["inst_warn"])
-    st.stop()
-if user_years <= 0.0:
-    st.warning(T["years_warn"])
-    st.stop()
-
-# ========= 初始化 / 修复 CSV =========
-COLUMNS = [
-    "name",
-    "institution",
-    "years_of_experience",
-    "modality",
-    "method",
-    "filename",
-    "sharpness",
-    "artifact",
-    "naturalness",
-    "diagnostic_confidence",
-]
-
-if SAVE_FILE and not os.path.exists(SAVE_FILE):
-    pd.DataFrame(columns=COLUMNS).to_csv(SAVE_FILE, index=False, encoding="utf-8")
-elif SAVE_FILE and os.path.exists(SAVE_FILE):
-    df_exist = pd.read_csv(SAVE_FILE, encoding="utf-8")
-    for col in COLUMNS:
-        if col not in df_exist.columns:
-            df_exist[col] = 0.0 if col == "years_of_experience" else ""
-    df_exist = df_exist[COLUMNS]
-    df_exist.to_csv(SAVE_FILE, index=False, encoding="utf-8")
+if not user_name: st.warning(T["name_warn"]); st.stop()
+if not user_institution: st.warning(T["inst_warn"]); st.stop()
+if user_years<=0.0: st.warning(T["years_warn"]); st.stop()
 
 # ========= 加载图像列表 =========
 image_list = []
 modality_path = os.path.join(IMAGE_ROOT, selected_modality)
-
 for method in sorted(os.listdir(modality_path)):
     method_path = os.path.join(modality_path, method)
-    if not os.path.isdir(method_path):
-        continue
+    if not os.path.isdir(method_path): continue
     for f in sorted(os.listdir(method_path)):
-        if f.lower().endswith((".jpg", ".jpeg", ".png")):
-            image_list.append(
-                {
-                    "modality": selected_modality,
-                    "method": method,
-                    "filename": f,
-                    "filepath": os.path.normpath(os.path.join(method_path, f)),
-                }
-            )
+        if f.lower().endswith((".jpg",".jpeg",".png")):
+            image_list.append({"modality": selected_modality,"method": method,"filename": f,"filepath": os.path.join(method_path,f)})
 
-if not image_list:
-    st.error(f"❌ 模态 {selected_modality} 下未找到图片！")
-    st.stop()
+if not image_list: st.error(f"❌ 模态 {selected_modality} 下未找到图片！"); st.stop()
 
-# ========= 跳过已评分 =========
-rated_set = set()
-if SAVE_FILE and os.path.exists(SAVE_FILE):
-    df_rated = pd.read_csv(SAVE_FILE, encoding="utf-8").fillna("")
-    if not df_rated.empty:
-        rated_set = set(df_rated["filename"] + "_" + df_rated["method"])
-
-while st.session_state.idx < len(image_list):
-    info = image_list[st.session_state.idx]
-    if f"{info['filename']}_{info['method']}" in rated_set:
-        st.session_state.idx += 1
-    else:
-        break
-
-# ========= 渲染主界面 =========
-st.markdown(
-    f"""
-    <h2>🧑‍⚕️ {selected_modality} {T['title']}</h2>
-    <p style='color:#666;'>
-    {user_name}（{user_institution} | {user_years} yrs） | {T['mos']}
-    </p>
-    """,
-    unsafe_allow_html=True,
-)
-
-total = len(image_list)
-completed = len(rated_set)
-progress = completed / total if total > 0 else 0
-st.progress(progress, text=f"{T['progress']}：{completed}/{total}（{progress:.1%}）")
+# ========= 显示主界面 =========
+st.markdown(f"<h2>🧑‍⚕️ {selected_modality} {T['title']}</h2><p style='color:#666;'>{user_name}（{user_institution} | {user_years} yrs） | {T['mos']}</p>",unsafe_allow_html=True)
+completed = 0
+if os.path.exists(SAVE_FILE): completed = len(pd.read_csv(SAVE_FILE))
+st.progress(completed/len(image_list), text=f"{T['progress']}：{completed}/{len(image_list)}")
 
 # ========= 保存评分函数 =========
 def save_rating(info, ratings):
-    row = {
-        "name": user_name,
-        "institution": user_institution,
-        "years_of_experience": user_years,
-        "modality": info["modality"],
-        "method": info["method"],
-        "filename": info["filename"],
-        **ratings,
-    }
-
     df_exist = pd.read_csv(SAVE_FILE, encoding="utf-8") if os.path.exists(SAVE_FILE) else pd.DataFrame(columns=COLUMNS)
-    # 覆盖已有行
-    df_exist = df_exist[
-        ~((df_exist["filename"] == info["filename"]) & (df_exist["method"] == info["method"]))
-    ]
-    df_exist = pd.concat([df_exist, pd.DataFrame([row])], ignore_index=True)
-    df_exist.to_csv(SAVE_FILE, index=False, encoding="utf-8")
+    row = {"name": user_name,"institution": user_institution,"years_of_experience": user_years,
+           "modality": info["modality"],"method": info["method"],"filename": info["filename"], **ratings}
+    df_exist = df_exist[~((df_exist["filename"]==info["filename"]) & (df_exist["method"]==info["method"]))]
+    df_exist = pd.concat([df_exist,pd.DataFrame([row])], ignore_index=True)
+    df_exist.to_csv(SAVE_FILE,index=False,encoding="utf-8")
+    # 保存到 SessionState
+    for k,v in ratings.items(): st.session_state[f"{k}_{st.session_state.idx}"]=v
 
-# ========= 渲染当前图片评分界面 =========
-def render_image_rating(idx):
+# ========= 渲染图片评分界面 =========
+def render_image(idx):
     info = image_list[idx]
-
-    # 加载图片
     try:
         img = Image.open(info["filepath"])
-        if img.mode == "RGBA":
-            img = img.convert("RGB")
-    except Exception as e:
-        st.error(f"❌ 图片加载失败：{info['filename']} | {e}")
+        if img.mode=="RGBA": img=img.convert("RGB")
+    except:
+        st.error(f"❌ 图片加载失败：{info['filename']}")
         return
-
-    # 左右布局
-    col1, col2 = st.columns([3, 4], gap="large")
+    col1,col2 = st.columns([3,4],gap="large")
     with col1:
         st.subheader(T["preview"])
         st.image(img, caption=info["filename"], use_container_width=True)
-        st.caption(f"{idx + 1}/{len(image_list)}")
-
+        st.caption(f"{idx+1}/{len(image_list)}")
     with col2:
         st.subheader(T["score_title"])
-        items = [
-            ("sharpness", *T["sharpness"]),
-            ("artifact", *T["artifact"]),
-            ("naturalness", *T["naturalness"]),
-            ("diagnostic_confidence", *T["diagnostic"]),
-        ]
-
-        # 加载已有评分
+        items = [("sharpness",*T["sharpness"]),("artifact",*T["artifact"]),
+                 ("naturalness",*T["naturalness"]),("diagnostic_confidence",*T["diagnostic"])]
         df_exist = pd.read_csv(SAVE_FILE, encoding="utf-8") if os.path.exists(SAVE_FILE) else pd.DataFrame(columns=COLUMNS)
-        exist_row = df_exist[
-            (df_exist["filename"] == info["filename"]) & (df_exist["method"] == info["method"])
-        ]
-        ratings = {}
-        for k, name, desc in items:
-            st.markdown(f"**{name}**")
-            default_val = int(exist_row[k].values[0]) if not exist_row.empty else 3
-            ratings[k] = st.slider(
-                " ", 1, 5, default_val, key=f"{k}_{idx}", label_visibility="collapsed"
-            )
+        exist_row = df_exist[(df_exist["filename"]==info["filename"]) & (df_exist["method"]==info["method"])]
+        ratings={}
+        for k,name,desc in items:
+            key=f"{k}_{idx}"
+            if key in st.session_state: default_val=st.session_state[key]
+            elif not exist_row.empty: default_val=int(exist_row[k].values[0])
+            else: default_val=3
+            ratings[k]=st.slider(" ",1,5,default_val,key=key,label_visibility="collapsed")
             st.caption(desc)
             st.markdown("---")
-
-        # 上一张 / 下一张按钮
-        btn_col1, btn_col2 = st.columns(2, gap="small")
-        with btn_col1:
+        # 上一张/下一张按钮
+        btn1,btn2=st.columns(2,gap="small")
+        with btn1:
             if st.button("⬅️ 上一张", use_container_width=True):
-                save_rating(info, ratings)
-                if st.session_state.idx > 0:
-                    st.session_state.idx -= 1
+                save_rating(info,ratings)
+                if st.session_state.idx>0:
+                    st.session_state.idx-=1
                     st.rerun()
-
-        with btn_col2:
-            if st.button(T["save_next"], type="primary", use_container_width=True):
-                save_rating(info, ratings)
-                if st.session_state.idx < len(image_list) - 1:
-                    st.session_state.idx += 1
-                    st.toast(T["saved"], icon="✅")
+        with btn2:
+            if st.button(T["save_next"],type="primary", use_container_width=True):
+                save_rating(info,ratings)
+                if st.session_state.idx<len(image_list)-1:
+                    st.session_state.idx+=1
+                    st.toast(T["saved"],icon="✅")
                     st.rerun()
                 else:
                     st.success(T["finished"])
                     st.balloons()
 
-# ========= 显示评分或完成提示 =========
+# ========= 显示评分界面 =========
 if st.session_state.idx < len(image_list):
-    render_image_rating(st.session_state.idx)
+    render_image(st.session_state.idx)
 else:
     st.success(T["finished"])
     st.balloons()
@@ -382,16 +243,10 @@ else:
 # ========= 数据下载 =========
 st.markdown("---")
 st.subheader(T["download_title"])
-if SAVE_FILE and os.path.exists(SAVE_FILE):
+if os.path.exists(SAVE_FILE):
     df = pd.read_csv(SAVE_FILE, encoding="utf-8")
     st.dataframe(df.drop(columns=["method"]), use_container_width=True)
-    with open(SAVE_FILE, "rb") as f:
-        st.download_button(
-            T["download"],
-            data=f,
-            file_name=os.path.basename(SAVE_FILE),
-            mime="text/csv",
-            use_container_width=True,
-        )
+    with open(SAVE_FILE,"rb") as f:
+        st.download_button(T["download"], data=f, file_name=os.path.basename(SAVE_FILE), mime="text/csv", use_container_width=True)
 else:
     st.info(T["no_data"])
