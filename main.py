@@ -186,22 +186,29 @@ if not image_list:
     st.error(f"❌ 模态 {selected_modality} 下未找到图片！")
     st.stop()
 
-# ========= 左侧图像列表 =========
+# ========= 左侧图像列表（每行显示） =========
 st.sidebar.subheader("📂 图像列表")
-image_options = [f"图像{i+1}" for i in range(len(image_list))]
-selected_image_name = st.sidebar.selectbox("选择图像", image_options, index=st.session_state.selected_image_idx)
-st.session_state.selected_image_idx = image_options.index(selected_image_name)
-info = image_list[st.session_state.selected_image_idx]
 
-# ========= 主界面 =========
-st.markdown(f"<h2>🧑‍⚕️ {selected_modality} {T['title']}</h2>", unsafe_allow_html=True)
-
-# 加载已评分集合，用于进度条
+# 已评分集合
 if os.path.exists(SAVE_FILE):
     df_rated = pd.read_csv(SAVE_FILE, encoding="utf-8")
     rated_set = set(df_rated["filename"] + "_" + df_rated["method"])
 else:
     rated_set = set()
+
+for idx, img_info in enumerate(image_list):
+    uid = f"{img_info['filename']}_{img_info['method']}"
+    label = f"图像{idx+1}"
+    if uid in rated_set:
+        label += " ✅"
+    if st.sidebar.button(label):
+        st.session_state.selected_image_idx = idx
+        st.experimental_rerun()
+
+info = image_list[st.session_state.selected_image_idx]
+
+# ========= 主界面 =========
+st.markdown(f"<h2>🧑‍⚕️ {selected_modality} {T['title']}</h2>", unsafe_allow_html=True)
 
 progress_val = len(rated_set)/len(image_list) if image_list else 0
 st.progress(progress_val, text=f"{T['progress']}：{len(rated_set)}/{len(image_list)}")
@@ -216,7 +223,7 @@ except Exception as e:
 col1, col2 = st.columns([3, 4], gap="large")
 with col1:
     st.subheader(T["preview"])
-    st.image(img, caption=f"{selected_image_name} ({info['filename']})", use_container_width=True)
+    st.image(img, caption=f"图像{st.session_state.selected_image_idx+1} ({info['filename']})", use_container_width=True)
     st.caption(f"{st.session_state.selected_image_idx + 1}/{len(image_list)}")
 
 with col2:
@@ -249,16 +256,13 @@ with col2:
         existing_uids = (df["filename"] + "_" + df["method"]).values
 
         if uid in existing_uids:
-            # 更新原行
             idx = df.index[df["filename"] + "_" + df["method"] == uid][0]
             for col in ratings:
                 df.at[idx, col] = ratings[col]
-            # 更新用户信息
             df.at[idx, "name"] = user_name
             df.at[idx, "institution"] = user_institution
             df.at[idx, "years_of_experience"] = user_years
         else:
-            # 新行追加
             df = pd.concat([df, pd.DataFrame([row])], ignore_index=True)
 
         df.to_csv(SAVE_FILE, index=False, encoding="utf-8")
@@ -266,7 +270,7 @@ with col2:
 
         # 跳到下一张
         st.session_state.selected_image_idx = min(st.session_state.selected_image_idx + 1, len(image_list)-1)
-        st.rerun()
+        st.experimental_rerun()
 
 # ========= 数据下载 =========
 st.markdown("---")
