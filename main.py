@@ -120,14 +120,9 @@ if not modalities:
 selected_modality = st.selectbox(T["select_modality"], modalities)
 
 # ========= 初始化 SessionState =========
-if "user_name" not in st.session_state:
-    st.session_state.user_name = ""
-if "user_institution" not in st.session_state:
-    st.session_state.user_institution = ""
-if "user_years" not in st.session_state:
-    st.session_state.user_years = ""
-if "selected_image_idx" not in st.session_state:
-    st.session_state.selected_image_idx = 0
+for key in ["user_name", "user_institution", "user_years", "selected_image_idx"]:
+    if key not in st.session_state:
+        st.session_state[key] = "" if "user" in key else 0
 
 # ========= 用户信息输入 =========
 st.markdown(f"### {T['rater_info']}")
@@ -217,7 +212,8 @@ info = image_list[st.session_state.selected_image_idx]
 
 # ========= 主界面 =========
 st.markdown(f"<h2>🧑‍⚕️ {selected_modality} {T['title']}</h2>", unsafe_allow_html=True)
-st.progress(len(rated_set)/len(image_list) if image_list else 0, text=f"{T['progress']}：{len(rated_set)}/{len(image_list)}")
+progress_val = len(rated_set)/len(image_list) if image_list else 0
+st.progress(progress_val, text=f"{T['progress']}：{len(rated_set)}/{len(image_list)}")
 
 try:
     img = Image.open(info["filepath"])
@@ -234,18 +230,15 @@ with col1:
 
 with col2:
     st.subheader(T["score_title"])
-    items = [
-        ("sharpness", *T["sharpness"]),
-        ("artifact", *T["artifact"]),
-        ("naturalness", *T["naturalness"]),
-        ("diagnostic_confidence", *T["diagnostic"]),
-    ]
+    metrics = ["sharpness", "artifact", "naturalness", "diagnostic_confidence"]
     ratings = {}
-    for k, name, desc in items:
-        st.markdown(f"**{name}**")
-        ratings[k] = st.slider(" ", 1, 5, 3, key=f"{k}_{st.session_state.selected_image_idx}", label_visibility="collapsed")
-        st.caption(desc)
-        st.markdown("---")
+    for metric in metrics:
+        # 每张图像独立 key
+        key = f"{metric}_{st.session_state.selected_image_idx}"
+        default_val = st.session_state.get(key, 3)
+        ratings[metric] = st.slider(metric, 1, 5, value=default_val, key=key)
+        # 自动保存到 session_state
+        st.session_state[key] = ratings[metric]
 
     if st.button(T["save_next"], type="primary", use_container_width=True):
         row = {
@@ -254,7 +247,9 @@ with col2:
         }
         pd.DataFrame([row]).to_csv(SAVE_FILE, mode="a", header=False, index=False, encoding="utf-8")
         st.toast(T["saved"], icon="✅")
-        st.experimental_rerun()
+        # 跳到下一张图像
+        st.session_state.selected_image_idx = min(st.session_state.selected_image_idx + 1, len(image_list)-1)
+        st.rerun()
 
 # ========= 数据下载 =========
 st.markdown("---")
