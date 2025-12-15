@@ -318,12 +318,13 @@ else:
             ("naturalness", *T["naturalness"]),
             ("diagnostic_confidence", *T["diagnostic"]),
         ]
-        ratings = {}
-        # 如果已有评分，加载已有值
-        df_exist = pd.read_csv(SAVE_FILE, encoding="utf-8") if os.path.exists(SAVE_FILE) else pd.DataFrame()
+
+        # 加载已有评分
+        df_exist = pd.read_csv(SAVE_FILE, encoding="utf-8") if os.path.exists(SAVE_FILE) else pd.DataFrame(columns=COLUMNS)
         exist_row = df_exist[
             (df_exist["filename"] == info["filename"]) & (df_exist["method"] == info["method"])
         ]
+        ratings = {}
         for k, name, desc in items:
             st.markdown(f"**{name}**")
             default_val = int(exist_row[k].values[0]) if not exist_row.empty else 3
@@ -333,12 +334,31 @@ else:
             st.caption(desc)
             st.markdown("---")
 
+        # 上一张 / 下一张按钮
         btn_col1, btn_col2 = st.columns(2, gap="small")
         with btn_col1:
             if st.button("⬅️ 上一张", use_container_width=True):
                 if st.session_state.idx > 0:
+                    # 保存当前评分
+                    row = {
+                        "name": user_name,
+                        "institution": user_institution,
+                        "years_of_experience": user_years,
+                        "modality": info["modality"],
+                        "method": info["method"],
+                        "filename": info["filename"],
+                        **ratings,
+                    }
+                    # 如果已存在则覆盖
+                    df_exist = df_exist[
+                        ~((df_exist["filename"] == info["filename"]) & (df_exist["method"] == info["method"]))
+                    ]
+                    df_exist = pd.concat([df_exist, pd.DataFrame([row])], ignore_index=True)
+                    df_exist.to_csv(SAVE_FILE, index=False, encoding="utf-8")
+
                     st.session_state.idx -= 1
                     st.rerun()
+
         with btn_col2:
             if st.button(T["save_next"], type="primary", use_container_width=True):
                 row = {
@@ -350,9 +370,13 @@ else:
                     "filename": info["filename"],
                     **ratings,
                 }
-                pd.DataFrame([row]).to_csv(
-                    SAVE_FILE, mode="a", header=False, index=False, encoding="utf-8"
-                )
+                # 如果已存在则覆盖
+                df_exist = df_exist[
+                    ~((df_exist["filename"] == info["filename"]) & (df_exist["method"] == info["method"]))
+                ]
+                df_exist = pd.concat([df_exist, pd.DataFrame([row])], ignore_index=True)
+                df_exist.to_csv(SAVE_FILE, index=False, encoding="utf-8")
+
                 st.session_state.idx += 1
                 st.toast(T["saved"], icon="✅")
                 st.rerun()
