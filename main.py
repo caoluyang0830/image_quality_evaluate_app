@@ -6,14 +6,8 @@ import warnings
 import re
 
 # ================= 基础设置 =================
+# 忽略无关警告（部署时更清爽）
 warnings.filterwarnings("ignore")
-
-# ========= 页面配置 =========
-st.set_page_config(
-    page_title="Image MOS Scoring System",
-    layout="centered",
-    initial_sidebar_state="collapsed",
-)
 
 # ========= 隐藏 Streamlit 默认 UI =========
 st.markdown(
@@ -22,146 +16,280 @@ st.markdown(
     #MainMenu {visibility: hidden;}
     footer {visibility: hidden;}
     .deploy-status {visibility: hidden;}
+    .stTextInput > div > div > input:focus { box-shadow: none; }
     </style>
     """,
     unsafe_allow_html=True,
 )
 
-# ========= 语言选择 =========
-lang = st.selectbox("🌐 Language / 语言", ["中文", "English"], index=0)
-LANG = "zh" if lang == "中文" else "en"
-
-# ========= 多语言文本 =========
-TEXT = {
-    "zh": {
-        "select_modality": "📌 选择评分模态",
-        "user_info": "🧑‍💻 评分人信息（必填）",
-        "name": "姓名",
-        "institution": "医疗机构",
-        "years": "从业年限（年）",
-        "years_ph": "如 3 或 3.5",
-        "system_title": "图像多指标主观评分系统",
-        "mos": "采用 MOS 评分（1–5 分）",
-        "preview": "图像预览",
-        "metrics": "📊 评分指标",
-        "save": "💾 保存并下一张",
-        "finish": "🎉 所有图像已评分完成！",
-        "sharpness": "视觉清晰度",
-        "artifact": "伪影",
-        "naturalness": "真实感",
-        "diagnostic": "可诊断性",
-    },
-    "en": {
-        "select_modality": "📌 Select Modality",
-        "user_info": "🧑‍💻 Rater Information (Required)",
-        "name": "Name",
-        "institution": "Institution",
-        "years": "Years of Experience",
-        "years_ph": "e.g. 3 or 3.5",
-        "system_title": "Multi-metric Image Subjective Scoring System",
-        "mos": "MOS rating (1–5)",
-        "preview": "Image Preview",
-        "metrics": "📊 Rating Metrics",
-        "save": "💾 Save & Next",
-        "finish": "🎉 All images have been rated!",
-        "sharpness": "Sharpness",
-        "artifact": "Artifact",
-        "naturalness": "Naturalness",
-        "diagnostic": "Diagnostic Confidence",
-    },
-}
-
-def t(key):
-    return TEXT[LANG].get(key, key)
+# ========= 页面配置 =========
+st.set_page_config(
+    page_title="图像多指标主观评分系统",
+    layout="centered",
+    initial_sidebar_state="collapsed",
+)
 
 # ========= 路径配置 =========
 IMAGE_ROOT = os.path.normpath("resultselect")
+
+# ========= 检查图像根目录 =========
 if not os.path.exists(IMAGE_ROOT):
-    st.error(f"Image root not found: {IMAGE_ROOT}")
+    st.error(
+        f"""
+        ❌ 图像根路径不存在: {IMAGE_ROOT}
+        请确认：
+        1. {IMAGE_ROOT} 文件夹已上传到应用根目录（和 main.py 同目录）
+        2. 文件夹名称拼写正确（区分大小写）
+        """
+    )
     st.stop()
 
 # ========= 模态选择 =========
-modalities = [m for m in os.listdir(IMAGE_ROOT) if os.path.isdir(os.path.join(IMAGE_ROOT, m))]
-selected_modality = st.selectbox(t("select_modality"), modalities)
+modalities = []
+for m in sorted(os.listdir(IMAGE_ROOT)):
+    m_path = os.path.join(IMAGE_ROOT, m)
+    if not os.path.isdir(m_path):
+        continue
+    has_images = False
+    for root, _, files in os.walk(m_path):
+        for f in files:
+            if f.lower().endswith((".jpg", ".jpeg", ".png")):
+                has_images = True
+                break
+        if has_images:
+            break
+    if has_images:
+        modalities.append(m)
 
-# ========= Session =========
-for k in ["idx", "user_name", "user_inst", "user_years"]:
-    if k not in st.session_state:
-        st.session_state[k] = "" if "user" in k else 0
-
-# ========= 用户信息 =========
-st.markdown(f"### {t('user_info')}")
-col1, col2, col3 = st.columns(3)
-
-with col1:
-    st.markdown(f"**{t('name')}**")
-    st.session_state.user_name = st.text_input("", st.session_state.user_name, placeholder=t("name"), label_visibility="collapsed")
-
-with col2:
-    st.markdown(f"**{t('institution')}**")
-    st.session_state.user_inst = st.text_input("", st.session_state.user_inst, placeholder=t("institution"), label_visibility="collapsed")
-
-with col3:
-    st.markdown(f"**{t('years')}**")
-    st.session_state.user_years = st.text_input("", st.session_state.user_years, placeholder=t("years_ph"), label_visibility="collapsed")
-
-# ========= 校验 =========
-if not st.session_state.user_name or not st.session_state.user_inst:
+if not modalities:
+    st.error(f"❌ {IMAGE_ROOT} 目录下未找到包含图片的模态文件夹！")
     st.stop()
 
-# ========= CSV =========
-def safe(name):
-    return re.sub(r'[\\/:*?"<>|]', '_', name)
+selected_modality = st.selectbox("📌 选择评分模态", modalities)
 
-SAVE_FILE = f"{selected_modality}_{safe(st.session_state.user_name)}.csv"
+# ========= 初始化 SessionState =========
+if "idx" not in st.session_state:
+    st.session_state.idx = 0
+if "user_name" not in st.session_state:
+    st.session_state.user_name = ""
+if "user_institution" not in st.session_state:
+    st.session_state.user_institution = ""
+if "user_years" not in st.session_state:
+    st.session_state.user_years = ""
 
-COLUMNS = ["name", "institution", "years", "modality", "method", "filename", "sharpness", "artifact", "naturalness", "diagnostic"]
-if not os.path.exists(SAVE_FILE):
-    pd.DataFrame(columns=COLUMNS).to_csv(SAVE_FILE, index=False)
+# ========= 用户信息输入 =========
+st.markdown("### 🧑‍💻 评分人信息（必填）")
+col_name, col_inst, col_years = st.columns(3, gap="medium")
 
-# ========= 图像列表 =========
-images = []
+with col_name:
+    user_name = st.text_input(
+        "姓名",
+        value=st.session_state.user_name,
+        placeholder="请输入您的姓名",
+        label_visibility="collapsed",
+        key="input_name",
+    )
+    st.session_state.user_name = user_name
 
-for method in os.listdir(os.path.join(IMAGE_ROOT, selected_modality)):
-    p = os.path.join(IMAGE_ROOT, selected_modality, method)
-    if not os.path.isdir(p):
+with col_inst:
+    user_institution = st.text_input(
+        "医疗机构",
+        value=st.session_state.user_institution,
+        placeholder="请输入您的医疗机构",
+        label_visibility="collapsed",
+        key="input_institution",
+    )
+    st.session_state.user_institution = user_institution
+
+with col_years:
+    user_years_input = st.text_input(
+        "从业年限",
+        value=st.session_state.user_years,
+        placeholder="请输入数字（0-80，支持小数）",
+        label_visibility="collapsed",
+        key="input_years",
+        help="支持 0-80 之间的整数或小数（如 3.5）",
+    )
+
+# ========= 从业年限校验 =========
+user_years = 0.0
+if user_years_input.strip():
+    if re.match(r'^-?\d+(\.\d+)?$', user_years_input):
+        user_years = float(user_years_input)
+        user_years = max(0.0, min(80.0, user_years))
+        user_years = round(user_years, 1)
+    else:
+        st.error("❌ 请输入有效的数字（支持小数）")
+
+st.session_state.user_years = str(user_years)
+
+# ========= 生成用户专属 CSV =========
+def sanitize_filename(name: str) -> str:
+    return re.sub(r'[\\/:*?"<>|]', '_', name).strip()
+
+if user_name:
+    SAVE_FILE = os.path.normpath(
+        f"{selected_modality}_{sanitize_filename(user_name)}_ratings.csv"
+    )
+else:
+    SAVE_FILE = ""
+
+# ========= 用户信息校验 =========
+if not user_name:
+    st.warning("⚠️ 请输入您的姓名！")
+    st.stop()
+if not user_institution:
+    st.warning("⚠️ 请输入您的医疗机构！")
+    st.stop()
+if user_years <= 0.0:
+    st.warning("⚠️ 请输入有效的从业年限（需大于 0）！")
+    st.stop()
+
+# ========= 初始化 / 修复 CSV =========
+COLUMNS = [
+    "name",
+    "institution",
+    "years_of_experience",
+    "modality",
+    "method",
+    "filename",
+    "sharpness",
+    "artifact",
+    "naturalness",
+    "diagnostic_confidence",
+]
+
+if SAVE_FILE and not os.path.exists(SAVE_FILE):
+    pd.DataFrame(columns=COLUMNS).to_csv(SAVE_FILE, index=False, encoding="utf-8")
+elif SAVE_FILE and os.path.exists(SAVE_FILE):
+    df_exist = pd.read_csv(SAVE_FILE, encoding="utf-8")
+    for col in COLUMNS:
+        if col not in df_exist.columns:
+            df_exist[col] = 0.0 if col == "years_of_experience" else ""
+    df_exist = df_exist[COLUMNS]
+    df_exist.to_csv(SAVE_FILE, index=False, encoding="utf-8")
+
+# ========= 加载图像列表 =========
+image_list = []
+modality_path = os.path.join(IMAGE_ROOT, selected_modality)
+
+for method in sorted(os.listdir(modality_path)):
+    method_path = os.path.join(modality_path, method)
+    if not os.path.isdir(method_path):
         continue
-    for f in os.listdir(p):
-        if f.lower().endswith(("png", "jpg", "jpeg")):
-            images.append({"method": method, "file": f, "path": os.path.join(p, f)})
+    for f in sorted(os.listdir(method_path)):
+        if f.lower().endswith((".jpg", ".jpeg", ".png")):
+            image_list.append(
+                {
+                    "modality": selected_modality,
+                    "method": method,
+                    "filename": f,
+                    "filepath": os.path.normpath(os.path.join(method_path, f)),
+                }
+            )
+
+if not image_list:
+    st.error(f"❌ 模态 {selected_modality} 下未找到图片！")
+    st.stop()
+
+# ========= 跳过已评分 =========
+rated_set = set()
+if SAVE_FILE and os.path.exists(SAVE_FILE):
+    df_rated = pd.read_csv(SAVE_FILE, encoding="utf-8").fillna("")
+    if not df_rated.empty:
+        rated_set = set(df_rated["filename"] + "_" + df_rated["method"])
+
+while st.session_state.idx < len(image_list):
+    info = image_list[st.session_state.idx]
+    if f"{info['filename']}_{info['method']}" in rated_set:
+        st.session_state.idx += 1
+    else:
+        break
 
 # ========= 主界面 =========
-st.markdown(f"## 🧑‍⚕️ {selected_modality} {t('system_title')}")
-st.caption(t("mos"))
+st.markdown(
+    f"""
+    <h2>🧑‍⚕️ {selected_modality} 图像多指标主观评分系统</h2>
+    <p style='color:#666;'>
+    {user_name}（{user_institution} | 从业 {user_years} 年） | MOS 1-5 分
+    </p>
+    """,
+    unsafe_allow_html=True,
+)
 
-if st.session_state.idx >= len(images):
-    st.success(t("finish"))
-    st.stop()
+total = len(image_list)
+completed = len(rated_set)
+progress = completed / total if total > 0 else 0
+st.progress(progress, text=f"当前进度：{completed}/{total}（{progress:.1%}）")
 
-img_info = images[st.session_state.idx]
-img = Image.open(img_info["path"])
-
-c1, c2 = st.columns([3, 4])
-with c1:
-    st.subheader(t("preview"))
-    st.image(img, use_container_width=True)
-
-with c2:
-    st.subheader(t("metrics"))
-    ratings = {}
-    for k in ["sharpness", "artifact", "naturalness", "diagnostic"]:
-        ratings[k] = st.slider(t(k), 1, 5, 3)
-
-    if st.button(t("save"), type="primary"):
-        row = {
-            "name": st.session_state.user_name,
-            "institution": st.session_state.user_inst,
-            "years": st.session_state.user_years,
-            "modality": selected_modality,
-            "method": img_info["method"],
-            "filename": img_info["file"],
-            **ratings,
-        }
-        pd.DataFrame([row]).to_csv(SAVE_FILE, mode="a", header=False, index=False)
+# ========= 评分流程 =========
+if st.session_state.idx >= len(image_list):
+    st.success(f"🎉 {user_name}，您的评分已全部完成！")
+    st.balloons()
+else:
+    info = image_list[st.session_state.idx]
+    try:
+        img = Image.open(info["filepath"])
+        if img.mode == "RGBA":
+            img = img.convert("RGB")
+    except Exception as e:
+        st.error(f"❌ 图片加载失败：{info['filename']} | {e}")
         st.session_state.idx += 1
         st.rerun()
+
+    col1, col2 = st.columns([3, 4], gap="large")
+    with col1:
+        st.subheader("图像预览")
+        st.image(img, caption=info["filename"], use_container_width=True)
+        st.caption(f"第 {st.session_state.idx + 1}/{total} 张")
+
+    with col2:
+        st.subheader("📊 评分指标")
+        items = [
+            ("sharpness", "清晰度", "1=差，5=好"),
+            ("artifact", "伪影", "1=多，5=少"),
+            ("naturalness", "真实感", "1=不符合，5=符合"),
+            ("diagnostic_confidence", "可诊断性", "1=不足，5=足够"),
+        ]
+        ratings = {}
+        for k, name, desc in items:
+            st.markdown(f"**{name}**")
+            ratings[k] = st.slider(
+                " ", 1, 5, 3, key=f"{k}_{st.session_state.idx}", label_visibility="collapsed"
+            )
+            st.caption(desc)
+            st.markdown("---")
+
+        if st.button("💾 保存并下一张", type="primary", use_container_width=True):
+            row = {
+                "name": user_name,
+                "institution": user_institution,
+                "years_of_experience": user_years,
+                "modality": info["modality"],
+                "method": info["method"],
+                "filename": info["filename"],
+                **ratings,
+            }
+            pd.DataFrame([row]).to_csv(
+                SAVE_FILE, mode="a", header=False, index=False, encoding="utf-8"
+            )
+            st.session_state.idx += 1
+            st.toast("✅ 已保存", icon="✅")
+            st.rerun()
+
+# ========= 数据下载 =========
+st.markdown("---")
+st.subheader("📥 我的评分数据")
+if SAVE_FILE and os.path.exists(SAVE_FILE):
+    df = pd.read_csv(SAVE_FILE, encoding="utf-8")
+    st.dataframe(df.drop(columns=["method"]), use_container_width=True)
+    with open(SAVE_FILE, "rb") as f:
+        st.download_button(
+            "📤 下载 CSV",
+            data=f,
+            file_name=os.path.basename(SAVE_FILE),
+            mime="text/csv",
+            use_container_width=True,
+        )
+else:
+    st.info("暂无评分数据")
