@@ -9,6 +9,10 @@ from datetime import datetime
 # ================= 基础设置 =================
 warnings.filterwarnings("ignore")
 
+# 关键修改1：禁用Streamlit的文件系统缓存（核心！）
+st.cache_resource.clear()  # 清除所有缓存资源
+st.cache_data.clear()      # 清除所有缓存数据
+
 st.markdown(
     """
     <style>
@@ -32,7 +36,10 @@ if "LANG" not in st.session_state or st.session_state["LANG"] not in ["中文", 
     st.session_state["LANG"] = "中文"
 
 def update_lang():
+    # 关键修改2：语言切换时重置所有相关状态
     st.session_state["selected_image_idx"] = 0
+    st.session_state.pop("selected_modality", None)
+    st.session_state.pop("image_list", None)  # 清除图像列表缓存
 
 LANG = st.selectbox("🌐 Language / 语言", ["中文", "English"], 
                    index=0 if st.session_state["LANG"] == "中文" else 1,
@@ -74,7 +81,9 @@ TEXT = {
         "go_next": "前往下一张",
         "go_prev": "返回上一张",
         "init_error": "初始化失败，请刷新页面重试",
-        "duplicate_warn": "⚠️ 发现重复评分记录，已自动保留最新一条"
+        "duplicate_warn": "⚠️ 发现重复评分记录，已自动保留最新一条",
+        "refresh_folder": "🔄 刷新文件夹结构",
+        "refreshed": "✅ 文件夹已刷新！"
     },
     "English": {
         "title": "Multi-Metric Image Subjective Scoring System",
@@ -110,7 +119,9 @@ TEXT = {
         "go_next": "Go to next",
         "go_prev": "Go to previous",
         "init_error": "Initialization failed, please refresh the page and try again",
-        "duplicate_warn": "⚠️ Duplicate rating records found, automatically keeping the latest one"
+        "duplicate_warn": "⚠️ Duplicate rating records found, automatically keeping the latest one",
+        "refresh_folder": "🔄 Refresh Folder Structure",
+        "refreshed": "✅ Folder structure refreshed!"
     }
 }
 
@@ -118,26 +129,75 @@ T = TEXT[LANG]
 
 # ========= 路径配置 =========
 IMAGE_ROOT = os.path.normpath("resultselect")
+
+# 关键修改3：封装文件夹扫描函数，强制每次执行
+def scan_modality_folders(root_path):
+    """重新扫描所有模态文件夹（无缓存）"""
+    if not os.path.exists(root_path):
+        return []
+    try:
+        modalities = [m for m in sorted(os.listdir(root_path)) if os.path.isdir(os.path.join(root_path, m))]
+        return modalities
+    except Exception as e:
+        st.error(f"❌ 读取模态文件夹失败: {str(e)}")
+        return []
+
+def scan_images_for_modality(modality_path):
+    """重新扫描指定模态下的所有图像（无缓存）"""
+    image_list = []
+    if not os.path.exists(modality_path):
+        return image_list
+    try:
+        for method in sorted(os.listdir(modality_path)):
+            method_path = os.path.join(modality_path, method)
+            if not os.path.isdir(method_path):
+                continue
+            for f in sorted(os.listdir(method_path)):
+                if f.lower().endswith((".jpg", ".jpeg", ".png", ".bmp", ".tiff")):
+                    filepath = os.path.join(method_path, f)
+                    if os.path.exists(filepath) and os.path.getsize(filepath) > 0:
+                        image_list.append({
+                            "modality": os.path.basename(modality_path),
+                            "method": method,
+                            "filename": f,
+                            "filepath": filepath
+                        })
+    except Exception as e:
+        st.error(f"❌ 读取图像列表失败: {str(e)}")
+    return image_list
+
+# 关键修改4：添加刷新按钮和重置逻辑
+def refresh_folder_structure():
+    """刷新文件夹结构，重置相关会话状态"""
+    st.session_state.pop("selected_modality", None)
+    st.session_state.pop("selected_image_idx", None)
+    st.session_state.pop("image_list", None)
+    st.toast(T["refreshed"], icon="✅")
+
+# 显示刷新按钮
+st.sidebar.button(T["refresh_folder"], on_click=refresh_folder_structure)
+
+# 检查根目录是否存在
 if not os.path.exists(IMAGE_ROOT):
     st.error(f"❌ {T['image_load_fail']}: {IMAGE_ROOT}")
     st.stop()
 
 # ========= 模态选择 =========
-try:
-    modalities = [m for m in sorted(os.listdir(IMAGE_ROOT)) if os.path.isdir(os.path.join(IMAGE_ROOT, m))]
-except Exception as e:
-    st.error(f"❌ 读取模态文件夹失败: {str(e)}")
-    st.stop()
+# 每次都重新扫描模态文件夹（无缓存）
+modalities = scan_modality_folders(IMAGE_ROOT)
 
 if not modalities:
     st.error(f"❌ {T['no_modalities']}")
     st.stop()
 
+# 初始化模态选择状态（每次刷新都会重置）
 if "selected_modality" not in st.session_state or st.session_state["selected_modality"] not in modalities:
     st.session_state["selected_modality"] = modalities[0]
 
 def update_modality():
+    """切换模态时重置图像索引和列表"""
     st.session_state["selected_image_idx"] = 0
+    st.session_state.pop("image_list", None)  # 清除旧图像列表
 
 selected_modality = st.selectbox(T["modality_select"], modalities,
                                index=modalities.index(st.session_state["selected_modality"]),
@@ -234,29 +294,9 @@ else:
         pd.DataFrame(columns=COLUMNS).to_csv(SAVE_FILE, index=False, encoding="utf-8-sig")
 
 # ========= 加载图像列表 =========
-image_list = []
+# 关键修改5：每次都重新扫描图像（无缓存），不使用session_state缓存
 modality_path = os.path.join(IMAGE_ROOT, selected_modality)
-try:
-    if os.path.exists(modality_path):
-        for method in sorted(os.listdir(modality_path)):
-            method_path = os.path.join(modality_path, method)
-            if not os.path.isdir(method_path):
-                continue
-            for f in sorted(os.listdir(method_path)):
-                if f.lower().endswith((".jpg", ".jpeg", ".png", ".bmp", ".tiff")):
-                    filepath = os.path.join(method_path, f)
-                    if os.path.exists(filepath) and os.path.getsize(filepath) > 0:
-                        image_list.append({
-                            "modality": selected_modality,
-                            "method": method,  # 后台保留，不显示
-                            "filename": f,
-                            "filepath": filepath
-                        })
-    else:
-        st.error(f"❌ 模态路径不存在: {modality_path}")
-except Exception as e:
-    st.error(f"❌ 读取图像列表失败: {str(e)}")
-    st.stop()
+image_list = scan_images_for_modality(modality_path)
 
 if not image_list:
     st.error(f"❌ {T['no_data']} in {selected_modality}!")
@@ -401,7 +441,7 @@ with col2:
         # 创建评分滑块
         for item in items:
             st.markdown(f"**{item['name']}**")
-            key = f"rating_{item['key']}_{current_idx}"
+            key = f"rating_{item['key']}_{current_idx}"  # 关键：索引变化确保滑块重新渲染
             init_val = max(1, min(5, int(initial_values[item['key']])))
             ratings[item['key']] = st.slider(
                 item['key'],
