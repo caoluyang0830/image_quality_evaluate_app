@@ -136,7 +136,7 @@ def scan_modality_folders(root_path):
     if not os.path.exists(root_path):
         return []
     try:
-        modalities = [m for m in sorted(os.listdir(root_path)) if os.path.isdir(os.path.join(root_path, m))]
+        modalities = [m for m in sorted(os.listdir(root_path), reverse=True) if os.path.isdir(os.path.join(root_path, m))]
         return modalities
     except Exception as e:
         st.error(f"❌ 读取模态文件夹失败: {str(e)}")
